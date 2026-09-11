@@ -1,3 +1,4 @@
+import { IconMapPinOff } from "@tabler/icons-react"
 import { TanStackDevtools } from "@tanstack/react-devtools"
 import type { QueryClient } from "@tanstack/react-query"
 import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools"
@@ -8,6 +9,8 @@ import {
 } from "@tanstack/react-router"
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools"
 import type { ReactNode } from "react"
+import { PageShell } from "@/components/page-shell"
+import { ThemeProvider } from "@/components/theme-provider"
 import appCss from "@/styles.css?url"
 
 export const Route = createRootRouteWithContext<{
@@ -18,9 +21,16 @@ export const Route = createRootRouteWithContext<{
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Flightpath" },
-      { name: "description", content: "Live aircraft on a world map." },
+      {
+        name: "description",
+        content:
+          "Live aircraft on a world map with flight, airport and airline details.",
+      },
     ],
-    links: [{ rel: "stylesheet", href: appCss }],
+    links: [
+      { rel: "stylesheet", href: appCss },
+      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+    ],
   }),
   notFoundComponent: NotFound,
   shellComponent: RootDocument,
@@ -28,12 +38,12 @@ export const Route = createRootRouteWithContext<{
 
 function RootDocument({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
       </head>
       <body>
-        {children}
+        <ThemeProvider>{children}</ThemeProvider>
         <TanStackDevtools
           config={{ position: "bottom-right" }}
           plugins={[
@@ -49,9 +59,12 @@ function RootDocument({ children }: { children: ReactNode }) {
 
 function NotFound() {
   return (
-    <main className="container mx-auto p-4 pt-16">
-      <h1 className="font-heading text-2xl">404</h1>
-      <p className="text-muted-foreground">Nothing at this address.</p>
-    </main>
+    <PageShell
+      icon={IconMapPinOff}
+      title="Nothing at this address"
+      lead="The page you asked for does not exist. The map is one click away."
+    >
+      <div />
+    </PageShell>
   )
 }

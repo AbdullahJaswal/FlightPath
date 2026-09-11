@@ -5,12 +5,22 @@
  * Live aircraft positions from the OpenSky Network with flight, airport and airline metadata.
  * OpenAPI spec version: dev
  */
-import { useMutation } from "@tanstack/react-query"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import type {
-  MutationFunction,
+  DataTag,
+  DefinedInitialDataOptions,
+  DefinedUseInfiniteQueryResult,
+  DefinedUseQueryResult,
+  InfiniteData,
+  InvalidateOptions,
   QueryClient,
-  UseMutationOptions,
-  UseMutationResult,
+  QueryFunction,
+  QueryKey,
+  UndefinedInitialDataOptions,
+  UseInfiniteQueryOptions,
+  UseInfiniteQueryResult,
+  UseQueryOptions,
+  UseQueryResult,
 } from "@tanstack/react-query"
 
 import type {
@@ -23,6 +33,24 @@ import type {
 import { bffFetch } from "../../server/bff-fetch.ts"
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1]
+
+const withQueryKey = <T extends object, K>(
+  query: T,
+  queryKey: K
+): T & { queryKey: K } => {
+  const result = { queryKey } as T & { queryKey: K }
+  for (const key of Object.keys(query)) {
+    // The explicit queryKey always wins, matching the previous
+    // `{ ...query, queryKey }` spread where it was set last.
+    if (key === "queryKey") continue
+    Object.defineProperty(result, key, {
+      enumerable: true,
+      configurable: true,
+      get: () => (query as Record<string, unknown>)[key],
+    })
+  }
+  return result
+}
 
 export const getListAircraftUrl = (params?: ListAircraftParams) => {
   const normalizedParams = new URLSearchParams()
@@ -54,75 +82,365 @@ export const listAircraft = async (
   })
 }
 
-export const getListAircraftMutationKey = () => ["listAircraft"] as const
-
-export const getListAircraftMutationOptions = <
-  TError = ErrorModel,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof listAircraft>>,
-    TError,
-    ListAircraftMutationVariables,
-    TContext
-  >
-  request?: SecondParameter<typeof bffFetch>
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof listAircraft>>,
-  TError,
-  ListAircraftMutationVariables,
-  TContext
-> => {
-  const mutationKey = getListAircraftMutationKey()
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined }
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof listAircraft>>,
-    ListAircraftMutationVariables
-  > = (props) => {
-    const { params } = props ?? {}
-
-    return listAircraft(params, requestOptions)
-  }
-
-  return { mutationFn, ...mutationOptions }
+export const getListAircraftInfiniteQueryKey = (
+  params?: ListAircraftParams
+) => {
+  return ["infinite", `/aircraft`, ...(params ? [params] : [])] as const
 }
 
-export type ListAircraftMutationResult = NonNullable<
+export const getListAircraftQueryKey = (params?: ListAircraftParams) => {
+  return [`/aircraft`, ...(params ? [params] : [])] as const
+}
+
+export const getListAircraftInfiniteQueryOptions = <
+  TData = InfiniteData<Awaited<ReturnType<typeof listAircraft>>>,
+  TError = ErrorModel,
+>(
+  params?: ListAircraftParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listAircraft>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListAircraftInfiniteQueryKey(params)
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listAircraft>>> = ({
+    signal,
+  }) => listAircraft(params, { signal, ...requestOptions })
+
+  return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
+    Awaited<ReturnType<typeof listAircraft>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListAircraftInfiniteQueryResult = NonNullable<
   Awaited<ReturnType<typeof listAircraft>>
 >
+export type ListAircraftInfiniteQueryError = ErrorModel
 
-export type ListAircraftMutationError = ErrorModel
-export type ListAircraftMutationVariables = { params?: ListAircraftParams }
-
-/**
- * @summary List aircraft in a bounding box
- */
-export const useListAircraft = <TError = ErrorModel, TContext = unknown>(
+export function useListAircraftInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof listAircraft>>>,
+  TError = ErrorModel,
+>(
+  params: undefined | ListAircraftParams,
+  options: {
+    query: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listAircraft>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAircraft>>,
+          TError,
+          Awaited<ReturnType<typeof listAircraft>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useListAircraftInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof listAircraft>>>,
+  TError = ErrorModel,
+>(
+  params?: ListAircraftParams,
   options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof listAircraft>>,
-      TError,
-      ListAircraftMutationVariables,
-      TContext
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listAircraft>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAircraft>>,
+          TError,
+          Awaited<ReturnType<typeof listAircraft>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useListAircraftInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof listAircraft>>>,
+  TError = ErrorModel,
+>(
+  params?: ListAircraftParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listAircraft>>,
+        TError,
+        TData
+      >
     >
     request?: SecondParameter<typeof bffFetch>
   },
   queryClient?: QueryClient
-): UseMutationResult<
-  Awaited<ReturnType<typeof listAircraft>>,
-  TError,
-  ListAircraftMutationVariables,
-  TContext
-> => {
-  return useMutation(getListAircraftMutationOptions(options), queryClient)
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
 }
+/**
+ * @summary List aircraft in a bounding box
+ */
+
+export function useListAircraftInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof listAircraft>>>,
+  TError = ErrorModel,
+>(
+  params?: ListAircraftParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listAircraft>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getListAircraftInfiniteQueryOptions(params, options)
+
+  const query = useInfiniteQuery(
+    queryOptions,
+    queryClient
+  ) as UseInfiniteQueryResult<TData, TError> & {
+    queryKey: DataTag<QueryKey, TData, TError>
+  }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary List aircraft in a bounding box
+ */
+export const prefetchListAircraftInfiniteQuery = async <
+  TData = Awaited<ReturnType<typeof listAircraft>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  params?: ListAircraftParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listAircraft>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getListAircraftInfiniteQueryOptions(params, options)
+
+  await queryClient.prefetchInfiniteQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useListAircraftInfinite} query
+ */
+export const invalidateListAircraftInfinite = async (
+  queryClient: QueryClient,
+  params?: ListAircraftParams,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getListAircraftInfiniteQueryKey(params) },
+    options
+  )
+
+  return queryClient
+}
+
+export const getListAircraftQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAircraft>>,
+  TError = ErrorModel,
+>(
+  params?: ListAircraftParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAircraft>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey = queryOptions?.queryKey ?? getListAircraftQueryKey(params)
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listAircraft>>> = ({
+    signal,
+  }) => listAircraft(params, { signal, ...requestOptions })
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAircraft>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListAircraftQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAircraft>>
+>
+export type ListAircraftQueryError = ErrorModel
+
+export function useListAircraft<
+  TData = Awaited<ReturnType<typeof listAircraft>>,
+  TError = ErrorModel,
+>(
+  params: undefined | ListAircraftParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAircraft>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAircraft>>,
+          TError,
+          Awaited<ReturnType<typeof listAircraft>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useListAircraft<
+  TData = Awaited<ReturnType<typeof listAircraft>>,
+  TError = ErrorModel,
+>(
+  params?: ListAircraftParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAircraft>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAircraft>>,
+          TError,
+          Awaited<ReturnType<typeof listAircraft>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useListAircraft<
+  TData = Awaited<ReturnType<typeof listAircraft>>,
+  TError = ErrorModel,
+>(
+  params?: ListAircraftParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAircraft>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary List aircraft in a bounding box
+ */
+
+export function useListAircraft<
+  TData = Awaited<ReturnType<typeof listAircraft>>,
+  TError = ErrorModel,
+>(
+  params?: ListAircraftParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAircraft>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getListAircraftQueryOptions(params, options)
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary List aircraft in a bounding box
+ */
+export const prefetchListAircraftQuery = async <
+  TData = Awaited<ReturnType<typeof listAircraft>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  params?: ListAircraftParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAircraft>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getListAircraftQueryOptions(params, options)
+
+  await queryClient.prefetchQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useListAircraft} query
+ */
+export const invalidateListAircraft = async (
+  queryClient: QueryClient,
+  params?: ListAircraftParams,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getListAircraftQueryKey(params) },
+    options
+  )
+
+  return queryClient
+}
+
 export const getGetAircraftUrl = (icao24: string) => {
   return `/aircraft/${icao24}`
 }
@@ -140,72 +458,369 @@ export const getAircraft = async (
   })
 }
 
-export const getGetAircraftMutationKey = () => ["getAircraft"] as const
-
-export const getGetAircraftMutationOptions = <
-  TError = ErrorModel,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof getAircraft>>,
-    TError,
-    GetAircraftMutationVariables,
-    TContext
-  >
-  request?: SecondParameter<typeof bffFetch>
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof getAircraft>>,
-  TError,
-  GetAircraftMutationVariables,
-  TContext
-> => {
-  const mutationKey = getGetAircraftMutationKey()
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined }
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof getAircraft>>,
-    GetAircraftMutationVariables
-  > = (props) => {
-    const { icao24 } = props ?? {}
-
-    return getAircraft(icao24, requestOptions)
-  }
-
-  return { mutationFn, ...mutationOptions }
+export const getGetAircraftInfiniteQueryKey = (icao24: string) => {
+  return ["infinite", `/aircraft/${icao24}`] as const
 }
 
-export type GetAircraftMutationResult = NonNullable<
+export const getGetAircraftQueryKey = (icao24: string) => {
+  return [`/aircraft/${icao24}`] as const
+}
+
+export const getGetAircraftInfiniteQueryOptions = <
+  TData = InfiniteData<Awaited<ReturnType<typeof getAircraft>>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAircraft>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAircraftInfiniteQueryKey(icao24)
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAircraft>>> = ({
+    signal,
+  }) => getAircraft(icao24, { signal, ...requestOptions })
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: icao24 !== null && icao24 !== undefined,
+    ...queryOptions,
+  } as UseInfiniteQueryOptions<
+    Awaited<ReturnType<typeof getAircraft>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetAircraftInfiniteQueryResult = NonNullable<
   Awaited<ReturnType<typeof getAircraft>>
 >
+export type GetAircraftInfiniteQueryError = ErrorModel
 
-export type GetAircraftMutationError = ErrorModel
-export type GetAircraftMutationVariables = { icao24: string }
-
-/**
- * @summary Get one aircraft with its recent trail
- */
-export const useGetAircraft = <TError = ErrorModel, TContext = unknown>(
+export function useGetAircraftInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getAircraft>>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options: {
+    query: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAircraft>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAircraft>>,
+          TError,
+          Awaited<ReturnType<typeof getAircraft>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetAircraftInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getAircraft>>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
   options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof getAircraft>>,
-      TError,
-      GetAircraftMutationVariables,
-      TContext
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAircraft>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAircraft>>,
+          TError,
+          Awaited<ReturnType<typeof getAircraft>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetAircraftInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getAircraft>>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAircraft>>,
+        TError,
+        TData
+      >
     >
     request?: SecondParameter<typeof bffFetch>
   },
   queryClient?: QueryClient
-): UseMutationResult<
-  Awaited<ReturnType<typeof getAircraft>>,
-  TError,
-  GetAircraftMutationVariables,
-  TContext
-> => {
-  return useMutation(getGetAircraftMutationOptions(options), queryClient)
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Get one aircraft with its recent trail
+ */
+
+export function useGetAircraftInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getAircraft>>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAircraft>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getGetAircraftInfiniteQueryOptions(icao24, options)
+
+  const query = useInfiniteQuery(
+    queryOptions,
+    queryClient
+  ) as UseInfiniteQueryResult<TData, TError> & {
+    queryKey: DataTag<QueryKey, TData, TError>
+  }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Get one aircraft with its recent trail
+ */
+export const prefetchGetAircraftInfiniteQuery = async <
+  TData = Awaited<ReturnType<typeof getAircraft>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAircraft>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getGetAircraftInfiniteQueryOptions(icao24, options)
+
+  await queryClient.prefetchInfiniteQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useGetAircraftInfinite} query
+ */
+export const invalidateGetAircraftInfinite = async (
+  queryClient: QueryClient,
+  icao24: string,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getGetAircraftInfiniteQueryKey(icao24) },
+    options
+  )
+
+  return queryClient
+}
+
+export const getGetAircraftQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAircraft>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAircraft>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey = queryOptions?.queryKey ?? getGetAircraftQueryKey(icao24)
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAircraft>>> = ({
+    signal,
+  }) => getAircraft(icao24, { signal, ...requestOptions })
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: icao24 !== null && icao24 !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAircraft>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetAircraftQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAircraft>>
+>
+export type GetAircraftQueryError = ErrorModel
+
+export function useGetAircraft<
+  TData = Awaited<ReturnType<typeof getAircraft>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAircraft>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAircraft>>,
+          TError,
+          Awaited<ReturnType<typeof getAircraft>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetAircraft<
+  TData = Awaited<ReturnType<typeof getAircraft>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAircraft>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAircraft>>,
+          TError,
+          Awaited<ReturnType<typeof getAircraft>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetAircraft<
+  TData = Awaited<ReturnType<typeof getAircraft>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAircraft>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Get one aircraft with its recent trail
+ */
+
+export function useGetAircraft<
+  TData = Awaited<ReturnType<typeof getAircraft>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAircraft>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getGetAircraftQueryOptions(icao24, options)
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Get one aircraft with its recent trail
+ */
+export const prefetchGetAircraftQuery = async <
+  TData = Awaited<ReturnType<typeof getAircraft>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAircraft>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getGetAircraftQueryOptions(icao24, options)
+
+  await queryClient.prefetchQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useGetAircraft} query
+ */
+export const invalidateGetAircraft = async (
+  queryClient: QueryClient,
+  icao24: string,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getGetAircraftQueryKey(icao24) },
+    options
+  )
+
+  return queryClient
 }

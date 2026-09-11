@@ -18,5 +18,7 @@ export default defineConfig({
     },
   },
   resolve: { tsconfigPaths: true },
+  // bundle the server so the runtime image needs no node_modules
+  ssr: { noExternal: true },
   plugins: [devtools(), tailwindcss(), tanstackStart(), viteReact()],
 })

@@ -75,6 +75,11 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm build
+      - name: server smoke test
+        run: |
+          node server.mjs &
+          curl -sf --retry 10 --retry-delay 1 --retry-all-errors http://localhost:3000/healthz
+          kill %1
 
   image:
     runs-on: ubuntu-latest

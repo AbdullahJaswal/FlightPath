@@ -5,12 +5,22 @@
  * Live aircraft positions from the OpenSky Network with flight, airport and airline metadata.
  * OpenAPI spec version: dev
  */
-import { useMutation } from "@tanstack/react-query"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import type {
-  MutationFunction,
+  DataTag,
+  DefinedInitialDataOptions,
+  DefinedUseInfiniteQueryResult,
+  DefinedUseQueryResult,
+  InfiniteData,
+  InvalidateOptions,
   QueryClient,
-  UseMutationOptions,
-  UseMutationResult,
+  QueryFunction,
+  QueryKey,
+  UndefinedInitialDataOptions,
+  UseInfiniteQueryOptions,
+  UseInfiniteQueryResult,
+  UseQueryOptions,
+  UseQueryResult,
 } from "@tanstack/react-query"
 
 import type { ErrorModel, SearchParams, SearchResult } from "../schemas"
@@ -18,6 +28,24 @@ import type { ErrorModel, SearchParams, SearchResult } from "../schemas"
 import { bffFetch } from "../../server/bff-fetch.ts"
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1]
+
+const withQueryKey = <T extends object, K>(
+  query: T,
+  queryKey: K
+): T & { queryKey: K } => {
+  const result = { queryKey } as T & { queryKey: K }
+  for (const key of Object.keys(query)) {
+    // The explicit queryKey always wins, matching the previous
+    // `{ ...query, queryKey }` spread where it was set last.
+    if (key === "queryKey") continue
+    Object.defineProperty(result, key, {
+      enumerable: true,
+      configurable: true,
+      get: () => (query as Record<string, unknown>)[key],
+    })
+  }
+  return result
+}
 
 export const getSearchUrl = (params: SearchParams) => {
   const normalizedParams = new URLSearchParams()
@@ -48,72 +76,332 @@ export const search = async (
   })
 }
 
-export const getSearchMutationKey = () => ["search"] as const
-
-export const getSearchMutationOptions = <
-  TError = ErrorModel,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof search>>,
-    TError,
-    SearchMutationVariables,
-    TContext
-  >
-  request?: SecondParameter<typeof bffFetch>
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof search>>,
-  TError,
-  SearchMutationVariables,
-  TContext
-> => {
-  const mutationKey = getSearchMutationKey()
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined }
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof search>>,
-    SearchMutationVariables
-  > = (props) => {
-    const { params } = props ?? {}
-
-    return search(params, requestOptions)
-  }
-
-  return { mutationFn, ...mutationOptions }
+export const getSearchInfiniteQueryKey = (params?: SearchParams) => {
+  return ["infinite", `/search`, ...(params ? [params] : [])] as const
 }
 
-export type SearchMutationResult = NonNullable<
+export const getSearchQueryKey = (params?: SearchParams) => {
+  return [`/search`, ...(params ? [params] : [])] as const
+}
+
+export const getSearchInfiniteQueryOptions = <
+  TData = InfiniteData<Awaited<ReturnType<typeof search>>>,
+  TError = ErrorModel,
+>(
+  params: SearchParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<Awaited<ReturnType<typeof search>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey = queryOptions?.queryKey ?? getSearchInfiniteQueryKey(params)
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof search>>> = ({
+    signal,
+  }) => search(params, { signal, ...requestOptions })
+
+  return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
+    Awaited<ReturnType<typeof search>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type SearchInfiniteQueryResult = NonNullable<
   Awaited<ReturnType<typeof search>>
 >
+export type SearchInfiniteQueryError = ErrorModel
 
-export type SearchMutationError = ErrorModel
-export type SearchMutationVariables = { params: SearchParams }
-
-/**
- * @summary Search aircraft, airports and airlines
- */
-export const useSearch = <TError = ErrorModel, TContext = unknown>(
+export function useSearchInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof search>>>,
+  TError = ErrorModel,
+>(
+  params: SearchParams,
+  options: {
+    query: Partial<
+      UseInfiniteQueryOptions<Awaited<ReturnType<typeof search>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof search>>,
+          TError,
+          Awaited<ReturnType<typeof search>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useSearchInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof search>>>,
+  TError = ErrorModel,
+>(
+  params: SearchParams,
   options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof search>>,
-      TError,
-      SearchMutationVariables,
-      TContext
+    query?: Partial<
+      UseInfiniteQueryOptions<Awaited<ReturnType<typeof search>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof search>>,
+          TError,
+          Awaited<ReturnType<typeof search>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useSearchInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof search>>>,
+  TError = ErrorModel,
+>(
+  params: SearchParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<Awaited<ReturnType<typeof search>>, TError, TData>
     >
     request?: SecondParameter<typeof bffFetch>
   },
   queryClient?: QueryClient
-): UseMutationResult<
-  Awaited<ReturnType<typeof search>>,
-  TError,
-  SearchMutationVariables,
-  TContext
-> => {
-  return useMutation(getSearchMutationOptions(options), queryClient)
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Search aircraft, airports and airlines
+ */
+
+export function useSearchInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof search>>>,
+  TError = ErrorModel,
+>(
+  params: SearchParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<Awaited<ReturnType<typeof search>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getSearchInfiniteQueryOptions(params, options)
+
+  const query = useInfiniteQuery(
+    queryOptions,
+    queryClient
+  ) as UseInfiniteQueryResult<TData, TError> & {
+    queryKey: DataTag<QueryKey, TData, TError>
+  }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Search aircraft, airports and airlines
+ */
+export const prefetchSearchInfiniteQuery = async <
+  TData = Awaited<ReturnType<typeof search>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  params: SearchParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<Awaited<ReturnType<typeof search>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getSearchInfiniteQueryOptions(params, options)
+
+  await queryClient.prefetchInfiniteQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useSearchInfinite} query
+ */
+export const invalidateSearchInfinite = async (
+  queryClient: QueryClient,
+  params: SearchParams,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getSearchInfiniteQueryKey(params) },
+    options
+  )
+
+  return queryClient
+}
+
+export const getSearchQueryOptions = <
+  TData = Awaited<ReturnType<typeof search>>,
+  TError = ErrorModel,
+>(
+  params: SearchParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof search>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey = queryOptions?.queryKey ?? getSearchQueryKey(params)
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof search>>> = ({
+    signal,
+  }) => search(params, { signal, ...requestOptions })
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof search>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type SearchQueryResult = NonNullable<Awaited<ReturnType<typeof search>>>
+export type SearchQueryError = ErrorModel
+
+export function useSearch<
+  TData = Awaited<ReturnType<typeof search>>,
+  TError = ErrorModel,
+>(
+  params: SearchParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof search>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof search>>,
+          TError,
+          Awaited<ReturnType<typeof search>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useSearch<
+  TData = Awaited<ReturnType<typeof search>>,
+  TError = ErrorModel,
+>(
+  params: SearchParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof search>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof search>>,
+          TError,
+          Awaited<ReturnType<typeof search>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useSearch<
+  TData = Awaited<ReturnType<typeof search>>,
+  TError = ErrorModel,
+>(
+  params: SearchParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof search>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Search aircraft, airports and airlines
+ */
+
+export function useSearch<
+  TData = Awaited<ReturnType<typeof search>>,
+  TError = ErrorModel,
+>(
+  params: SearchParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof search>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getSearchQueryOptions(params, options)
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Search aircraft, airports and airlines
+ */
+export const prefetchSearchQuery = async <
+  TData = Awaited<ReturnType<typeof search>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  params: SearchParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof search>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getSearchQueryOptions(params, options)
+
+  await queryClient.prefetchQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useSearch} query
+ */
+export const invalidateSearch = async (
+  queryClient: QueryClient,
+  params: SearchParams,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getSearchQueryKey(params) },
+    options
+  )
+
+  return queryClient
 }

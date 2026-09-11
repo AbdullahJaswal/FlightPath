@@ -5,12 +5,22 @@
  * Live aircraft positions from the OpenSky Network with flight, airport and airline metadata.
  * OpenAPI spec version: dev
  */
-import { useMutation } from "@tanstack/react-query"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import type {
-  MutationFunction,
+  DataTag,
+  DefinedInitialDataOptions,
+  DefinedUseInfiniteQueryResult,
+  DefinedUseQueryResult,
+  InfiniteData,
+  InvalidateOptions,
   QueryClient,
-  UseMutationOptions,
-  UseMutationResult,
+  QueryFunction,
+  QueryKey,
+  UndefinedInitialDataOptions,
+  UseInfiniteQueryOptions,
+  UseInfiniteQueryResult,
+  UseQueryOptions,
+  UseQueryResult,
 } from "@tanstack/react-query"
 
 import type { ErrorModel, FlightDetail, Schedule } from "../schemas"
@@ -18,6 +28,24 @@ import type { ErrorModel, FlightDetail, Schedule } from "../schemas"
 import { bffFetch } from "../../server/bff-fetch.ts"
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1]
+
+const withQueryKey = <T extends object, K>(
+  query: T,
+  queryKey: K
+): T & { queryKey: K } => {
+  const result = { queryKey } as T & { queryKey: K }
+  for (const key of Object.keys(query)) {
+    // The explicit queryKey always wins, matching the previous
+    // `{ ...query, queryKey }` spread where it was set last.
+    if (key === "queryKey") continue
+    Object.defineProperty(result, key, {
+      enumerable: true,
+      configurable: true,
+      get: () => (query as Record<string, unknown>)[key],
+    })
+  }
+  return result
+}
 
 export const getGetFlightUrl = (callsign: string) => {
   return `/flights/${callsign}`
@@ -37,75 +65,371 @@ export const getFlight = async (
   })
 }
 
-export const getGetFlightMutationKey = () => ["getFlight"] as const
-
-export const getGetFlightMutationOptions = <
-  TError = ErrorModel,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof getFlight>>,
-    TError,
-    GetFlightMutationVariables,
-    TContext
-  >
-  request?: SecondParameter<typeof bffFetch>
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof getFlight>>,
-  TError,
-  GetFlightMutationVariables,
-  TContext
-> => {
-  const mutationKey = getGetFlightMutationKey()
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined }
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof getFlight>>,
-    GetFlightMutationVariables
-  > = (props) => {
-    const { callsign } = props ?? {}
-
-    return getFlight(callsign, requestOptions)
-  }
-
-  return { mutationFn, ...mutationOptions }
+export const getGetFlightInfiniteQueryKey = (callsign: string) => {
+  return ["infinite", `/flights/${callsign}`] as const
 }
 
-export type GetFlightMutationResult = NonNullable<
+export const getGetFlightQueryKey = (callsign: string) => {
+  return [`/flights/${callsign}`] as const
+}
+
+export const getGetFlightInfiniteQueryOptions = <
+  TData = InfiniteData<Awaited<ReturnType<typeof getFlight>>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getFlight>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetFlightInfiniteQueryKey(callsign)
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getFlight>>> = ({
+    signal,
+  }) => getFlight(callsign, { signal, ...requestOptions })
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: callsign !== null && callsign !== undefined,
+    ...queryOptions,
+  } as UseInfiniteQueryOptions<
+    Awaited<ReturnType<typeof getFlight>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetFlightInfiniteQueryResult = NonNullable<
   Awaited<ReturnType<typeof getFlight>>
 >
+export type GetFlightInfiniteQueryError = ErrorModel
 
-export type GetFlightMutationError = ErrorModel
-export type GetFlightMutationVariables = { callsign: string }
-
-/**
- * @summary Get a flight by callsign
- */
-export const useGetFlight = <TError = ErrorModel, TContext = unknown>(
+export function useGetFlightInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getFlight>>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options: {
+    query: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getFlight>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFlight>>,
+          TError,
+          Awaited<ReturnType<typeof getFlight>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetFlightInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getFlight>>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
   options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof getFlight>>,
-      TError,
-      GetFlightMutationVariables,
-      TContext
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getFlight>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFlight>>,
+          TError,
+          Awaited<ReturnType<typeof getFlight>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetFlightInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getFlight>>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getFlight>>,
+        TError,
+        TData
+      >
     >
     request?: SecondParameter<typeof bffFetch>
   },
   queryClient?: QueryClient
-): UseMutationResult<
-  Awaited<ReturnType<typeof getFlight>>,
-  TError,
-  GetFlightMutationVariables,
-  TContext
-> => {
-  return useMutation(getGetFlightMutationOptions(options), queryClient)
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
 }
+/**
+ * @summary Get a flight by callsign
+ */
+
+export function useGetFlightInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getFlight>>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getFlight>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getGetFlightInfiniteQueryOptions(callsign, options)
+
+  const query = useInfiniteQuery(
+    queryOptions,
+    queryClient
+  ) as UseInfiniteQueryResult<TData, TError> & {
+    queryKey: DataTag<QueryKey, TData, TError>
+  }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Get a flight by callsign
+ */
+export const prefetchGetFlightInfiniteQuery = async <
+  TData = Awaited<ReturnType<typeof getFlight>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getFlight>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getGetFlightInfiniteQueryOptions(callsign, options)
+
+  await queryClient.prefetchInfiniteQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useGetFlightInfinite} query
+ */
+export const invalidateGetFlightInfinite = async (
+  queryClient: QueryClient,
+  callsign: string,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getGetFlightInfiniteQueryKey(callsign) },
+    options
+  )
+
+  return queryClient
+}
+
+export const getGetFlightQueryOptions = <
+  TData = Awaited<ReturnType<typeof getFlight>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getFlight>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey = queryOptions?.queryKey ?? getGetFlightQueryKey(callsign)
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getFlight>>> = ({
+    signal,
+  }) => getFlight(callsign, { signal, ...requestOptions })
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: callsign !== null && callsign !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<Awaited<ReturnType<typeof getFlight>>, TError, TData> & {
+    queryKey: DataTag<QueryKey, TData, TError>
+  }
+}
+
+export type GetFlightQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getFlight>>
+>
+export type GetFlightQueryError = ErrorModel
+
+export function useGetFlight<
+  TData = Awaited<ReturnType<typeof getFlight>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getFlight>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFlight>>,
+          TError,
+          Awaited<ReturnType<typeof getFlight>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetFlight<
+  TData = Awaited<ReturnType<typeof getFlight>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getFlight>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFlight>>,
+          TError,
+          Awaited<ReturnType<typeof getFlight>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetFlight<
+  TData = Awaited<ReturnType<typeof getFlight>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getFlight>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Get a flight by callsign
+ */
+
+export function useGetFlight<
+  TData = Awaited<ReturnType<typeof getFlight>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getFlight>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getGetFlightQueryOptions(callsign, options)
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Get a flight by callsign
+ */
+export const prefetchGetFlightQuery = async <
+  TData = Awaited<ReturnType<typeof getFlight>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getFlight>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getGetFlightQueryOptions(callsign, options)
+
+  await queryClient.prefetchQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useGetFlight} query
+ */
+export const invalidateGetFlight = async (
+  queryClient: QueryClient,
+  callsign: string,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getGetFlightQueryKey(callsign) },
+    options
+  )
+
+  return queryClient
+}
+
 export const getGetFlightScheduleUrl = (callsign: string) => {
   return `/flights/${callsign}/schedule`
 }
@@ -124,73 +448,400 @@ export const getFlightSchedule = async (
   })
 }
 
-export const getGetFlightScheduleMutationKey = () =>
-  ["getFlightSchedule"] as const
-
-export const getGetFlightScheduleMutationOptions = <
-  TError = ErrorModel,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof getFlightSchedule>>,
-    TError,
-    GetFlightScheduleMutationVariables,
-    TContext
-  >
-  request?: SecondParameter<typeof bffFetch>
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof getFlightSchedule>>,
-  TError,
-  GetFlightScheduleMutationVariables,
-  TContext
-> => {
-  const mutationKey = getGetFlightScheduleMutationKey()
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined }
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof getFlightSchedule>>,
-    GetFlightScheduleMutationVariables
-  > = (props) => {
-    const { callsign } = props ?? {}
-
-    return getFlightSchedule(callsign, requestOptions)
-  }
-
-  return { mutationFn, ...mutationOptions }
+export const getGetFlightScheduleInfiniteQueryKey = (callsign: string) => {
+  return ["infinite", `/flights/${callsign}/schedule`] as const
 }
 
-export type GetFlightScheduleMutationResult = NonNullable<
+export const getGetFlightScheduleQueryKey = (callsign: string) => {
+  return [`/flights/${callsign}/schedule`] as const
+}
+
+export const getGetFlightScheduleInfiniteQueryOptions = <
+  TData = InfiniteData<Awaited<ReturnType<typeof getFlightSchedule>>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getFlightSchedule>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetFlightScheduleInfiniteQueryKey(callsign)
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getFlightSchedule>>
+  > = ({ signal }) => getFlightSchedule(callsign, { signal, ...requestOptions })
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: callsign !== null && callsign !== undefined,
+    ...queryOptions,
+  } as UseInfiniteQueryOptions<
+    Awaited<ReturnType<typeof getFlightSchedule>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetFlightScheduleInfiniteQueryResult = NonNullable<
   Awaited<ReturnType<typeof getFlightSchedule>>
 >
+export type GetFlightScheduleInfiniteQueryError = ErrorModel
 
-export type GetFlightScheduleMutationError = ErrorModel
-export type GetFlightScheduleMutationVariables = { callsign: string }
-
-/**
- * @summary Get the schedule of a flight
- */
-export const useGetFlightSchedule = <TError = ErrorModel, TContext = unknown>(
+export function useGetFlightScheduleInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getFlightSchedule>>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options: {
+    query: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getFlightSchedule>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFlightSchedule>>,
+          TError,
+          Awaited<ReturnType<typeof getFlightSchedule>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetFlightScheduleInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getFlightSchedule>>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
   options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof getFlightSchedule>>,
-      TError,
-      GetFlightScheduleMutationVariables,
-      TContext
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getFlightSchedule>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFlightSchedule>>,
+          TError,
+          Awaited<ReturnType<typeof getFlightSchedule>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetFlightScheduleInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getFlightSchedule>>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getFlightSchedule>>,
+        TError,
+        TData
+      >
     >
     request?: SecondParameter<typeof bffFetch>
   },
   queryClient?: QueryClient
-): UseMutationResult<
-  Awaited<ReturnType<typeof getFlightSchedule>>,
-  TError,
-  GetFlightScheduleMutationVariables,
-  TContext
-> => {
-  return useMutation(getGetFlightScheduleMutationOptions(options), queryClient)
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Get the schedule of a flight
+ */
+
+export function useGetFlightScheduleInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getFlightSchedule>>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getFlightSchedule>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getGetFlightScheduleInfiniteQueryOptions(
+    callsign,
+    options
+  )
+
+  const query = useInfiniteQuery(
+    queryOptions,
+    queryClient
+  ) as UseInfiniteQueryResult<TData, TError> & {
+    queryKey: DataTag<QueryKey, TData, TError>
+  }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Get the schedule of a flight
+ */
+export const prefetchGetFlightScheduleInfiniteQuery = async <
+  TData = Awaited<ReturnType<typeof getFlightSchedule>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getFlightSchedule>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getGetFlightScheduleInfiniteQueryOptions(
+    callsign,
+    options
+  )
+
+  await queryClient.prefetchInfiniteQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useGetFlightScheduleInfinite} query
+ */
+export const invalidateGetFlightScheduleInfinite = async (
+  queryClient: QueryClient,
+  callsign: string,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getGetFlightScheduleInfiniteQueryKey(callsign) },
+    options
+  )
+
+  return queryClient
+}
+
+export const getGetFlightScheduleQueryOptions = <
+  TData = Awaited<ReturnType<typeof getFlightSchedule>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getFlightSchedule>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetFlightScheduleQueryKey(callsign)
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getFlightSchedule>>
+  > = ({ signal }) => getFlightSchedule(callsign, { signal, ...requestOptions })
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: callsign !== null && callsign !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getFlightSchedule>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetFlightScheduleQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getFlightSchedule>>
+>
+export type GetFlightScheduleQueryError = ErrorModel
+
+export function useGetFlightSchedule<
+  TData = Awaited<ReturnType<typeof getFlightSchedule>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getFlightSchedule>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFlightSchedule>>,
+          TError,
+          Awaited<ReturnType<typeof getFlightSchedule>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetFlightSchedule<
+  TData = Awaited<ReturnType<typeof getFlightSchedule>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getFlightSchedule>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getFlightSchedule>>,
+          TError,
+          Awaited<ReturnType<typeof getFlightSchedule>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetFlightSchedule<
+  TData = Awaited<ReturnType<typeof getFlightSchedule>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getFlightSchedule>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Get the schedule of a flight
+ */
+
+export function useGetFlightSchedule<
+  TData = Awaited<ReturnType<typeof getFlightSchedule>>,
+  TError = ErrorModel,
+>(
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getFlightSchedule>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getGetFlightScheduleQueryOptions(callsign, options)
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Get the schedule of a flight
+ */
+export const prefetchGetFlightScheduleQuery = async <
+  TData = Awaited<ReturnType<typeof getFlightSchedule>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  callsign: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getFlightSchedule>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getGetFlightScheduleQueryOptions(callsign, options)
+
+  await queryClient.prefetchQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useGetFlightSchedule} query
+ */
+export const invalidateGetFlightSchedule = async (
+  queryClient: QueryClient,
+  callsign: string,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getGetFlightScheduleQueryKey(callsign) },
+    options
+  )
+
+  return queryClient
 }

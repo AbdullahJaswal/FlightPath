@@ -23,7 +23,7 @@ export default defineConfig({
         },
         query: {
           useQuery: true,
-          useMutation: true,
+          useMutation: false,
           useInfinite: true,
           usePrefetch: true,
           useInvalidate: true,

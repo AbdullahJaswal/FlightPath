@@ -5,12 +5,22 @@
  * Live aircraft positions from the OpenSky Network with flight, airport and airline metadata.
  * OpenAPI spec version: dev
  */
-import { useMutation } from "@tanstack/react-query"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import type {
-  MutationFunction,
+  DataTag,
+  DefinedInitialDataOptions,
+  DefinedUseInfiniteQueryResult,
+  DefinedUseQueryResult,
+  InfiniteData,
+  InvalidateOptions,
   QueryClient,
-  UseMutationOptions,
-  UseMutationResult,
+  QueryFunction,
+  QueryKey,
+  UndefinedInitialDataOptions,
+  UseInfiniteQueryOptions,
+  UseInfiniteQueryResult,
+  UseQueryOptions,
+  UseQueryResult,
 } from "@tanstack/react-query"
 
 import type { Airport, ErrorModel } from "../schemas"
@@ -18,6 +28,24 @@ import type { Airport, ErrorModel } from "../schemas"
 import { bffFetch } from "../../server/bff-fetch.ts"
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1]
+
+const withQueryKey = <T extends object, K>(
+  query: T,
+  queryKey: K
+): T & { queryKey: K } => {
+  const result = { queryKey } as T & { queryKey: K }
+  for (const key of Object.keys(query)) {
+    // The explicit queryKey always wins, matching the previous
+    // `{ ...query, queryKey }` spread where it was set last.
+    if (key === "queryKey") continue
+    Object.defineProperty(result, key, {
+      enumerable: true,
+      configurable: true,
+      get: () => (query as Record<string, unknown>)[key],
+    })
+  }
+  return result
+}
 
 export const getGetAirportUrl = (code: string) => {
   return `/airports/${code}`
@@ -36,72 +64,368 @@ export const getAirport = async (
   })
 }
 
-export const getGetAirportMutationKey = () => ["getAirport"] as const
-
-export const getGetAirportMutationOptions = <
-  TError = ErrorModel,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof getAirport>>,
-    TError,
-    GetAirportMutationVariables,
-    TContext
-  >
-  request?: SecondParameter<typeof bffFetch>
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof getAirport>>,
-  TError,
-  GetAirportMutationVariables,
-  TContext
-> => {
-  const mutationKey = getGetAirportMutationKey()
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined }
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof getAirport>>,
-    GetAirportMutationVariables
-  > = (props) => {
-    const { code } = props ?? {}
-
-    return getAirport(code, requestOptions)
-  }
-
-  return { mutationFn, ...mutationOptions }
+export const getGetAirportInfiniteQueryKey = (code: string) => {
+  return ["infinite", `/airports/${code}`] as const
 }
 
-export type GetAirportMutationResult = NonNullable<
+export const getGetAirportQueryKey = (code: string) => {
+  return [`/airports/${code}`] as const
+}
+
+export const getGetAirportInfiniteQueryOptions = <
+  TData = InfiniteData<Awaited<ReturnType<typeof getAirport>>>,
+  TError = ErrorModel,
+>(
+  code: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAirport>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey = queryOptions?.queryKey ?? getGetAirportInfiniteQueryKey(code)
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAirport>>> = ({
+    signal,
+  }) => getAirport(code, { signal, ...requestOptions })
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: code !== null && code !== undefined,
+    ...queryOptions,
+  } as UseInfiniteQueryOptions<
+    Awaited<ReturnType<typeof getAirport>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetAirportInfiniteQueryResult = NonNullable<
   Awaited<ReturnType<typeof getAirport>>
 >
+export type GetAirportInfiniteQueryError = ErrorModel
 
-export type GetAirportMutationError = ErrorModel
-export type GetAirportMutationVariables = { code: string }
-
-/**
- * @summary Get an airport by ICAO or IATA code
- */
-export const useGetAirport = <TError = ErrorModel, TContext = unknown>(
+export function useGetAirportInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getAirport>>>,
+  TError = ErrorModel,
+>(
+  code: string,
+  options: {
+    query: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAirport>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAirport>>,
+          TError,
+          Awaited<ReturnType<typeof getAirport>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetAirportInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getAirport>>>,
+  TError = ErrorModel,
+>(
+  code: string,
   options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof getAirport>>,
-      TError,
-      GetAirportMutationVariables,
-      TContext
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAirport>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAirport>>,
+          TError,
+          Awaited<ReturnType<typeof getAirport>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetAirportInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getAirport>>>,
+  TError = ErrorModel,
+>(
+  code: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAirport>>,
+        TError,
+        TData
+      >
     >
     request?: SecondParameter<typeof bffFetch>
   },
   queryClient?: QueryClient
-): UseMutationResult<
-  Awaited<ReturnType<typeof getAirport>>,
-  TError,
-  GetAirportMutationVariables,
-  TContext
-> => {
-  return useMutation(getGetAirportMutationOptions(options), queryClient)
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Get an airport by ICAO or IATA code
+ */
+
+export function useGetAirportInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getAirport>>>,
+  TError = ErrorModel,
+>(
+  code: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAirport>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getGetAirportInfiniteQueryOptions(code, options)
+
+  const query = useInfiniteQuery(
+    queryOptions,
+    queryClient
+  ) as UseInfiniteQueryResult<TData, TError> & {
+    queryKey: DataTag<QueryKey, TData, TError>
+  }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Get an airport by ICAO or IATA code
+ */
+export const prefetchGetAirportInfiniteQuery = async <
+  TData = Awaited<ReturnType<typeof getAirport>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  code: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAirport>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getGetAirportInfiniteQueryOptions(code, options)
+
+  await queryClient.prefetchInfiniteQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useGetAirportInfinite} query
+ */
+export const invalidateGetAirportInfinite = async (
+  queryClient: QueryClient,
+  code: string,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getGetAirportInfiniteQueryKey(code) },
+    options
+  )
+
+  return queryClient
+}
+
+export const getGetAirportQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAirport>>,
+  TError = ErrorModel,
+>(
+  code: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAirport>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey = queryOptions?.queryKey ?? getGetAirportQueryKey(code)
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getAirport>>> = ({
+    signal,
+  }) => getAirport(code, { signal, ...requestOptions })
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: code !== null && code !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAirport>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetAirportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAirport>>
+>
+export type GetAirportQueryError = ErrorModel
+
+export function useGetAirport<
+  TData = Awaited<ReturnType<typeof getAirport>>,
+  TError = ErrorModel,
+>(
+  code: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAirport>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAirport>>,
+          TError,
+          Awaited<ReturnType<typeof getAirport>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetAirport<
+  TData = Awaited<ReturnType<typeof getAirport>>,
+  TError = ErrorModel,
+>(
+  code: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAirport>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAirport>>,
+          TError,
+          Awaited<ReturnType<typeof getAirport>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetAirport<
+  TData = Awaited<ReturnType<typeof getAirport>>,
+  TError = ErrorModel,
+>(
+  code: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAirport>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Get an airport by ICAO or IATA code
+ */
+
+export function useGetAirport<
+  TData = Awaited<ReturnType<typeof getAirport>>,
+  TError = ErrorModel,
+>(
+  code: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAirport>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getGetAirportQueryOptions(code, options)
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Get an airport by ICAO or IATA code
+ */
+export const prefetchGetAirportQuery = async <
+  TData = Awaited<ReturnType<typeof getAirport>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  code: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getAirport>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getGetAirportQueryOptions(code, options)
+
+  await queryClient.prefetchQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useGetAirport} query
+ */
+export const invalidateGetAirport = async (
+  queryClient: QueryClient,
+  code: string,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getGetAirportQueryKey(code) },
+    options
+  )
+
+  return queryClient
 }

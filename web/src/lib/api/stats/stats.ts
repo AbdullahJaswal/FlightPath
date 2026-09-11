@@ -5,12 +5,22 @@
  * Live aircraft positions from the OpenSky Network with flight, airport and airline metadata.
  * OpenAPI spec version: dev
  */
-import { useMutation } from "@tanstack/react-query"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import type {
-  MutationFunction,
+  DataTag,
+  DefinedInitialDataOptions,
+  DefinedUseInfiniteQueryResult,
+  DefinedUseQueryResult,
+  InfiniteData,
+  InvalidateOptions,
   QueryClient,
-  UseMutationOptions,
-  UseMutationResult,
+  QueryFunction,
+  QueryKey,
+  UndefinedInitialDataOptions,
+  UseInfiniteQueryOptions,
+  UseInfiniteQueryResult,
+  UseQueryOptions,
+  UseQueryResult,
 } from "@tanstack/react-query"
 
 import type { ErrorModel, Stats } from "../schemas"
@@ -18,6 +28,24 @@ import type { ErrorModel, Stats } from "../schemas"
 import { bffFetch } from "../../server/bff-fetch.ts"
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1]
+
+const withQueryKey = <T extends object, K>(
+  query: T,
+  queryKey: K
+): T & { queryKey: K } => {
+  const result = { queryKey } as T & { queryKey: K }
+  for (const key of Object.keys(query)) {
+    // The explicit queryKey always wins, matching the previous
+    // `{ ...query, queryKey }` spread where it was set last.
+    if (key === "queryKey") continue
+    Object.defineProperty(result, key, {
+      enumerable: true,
+      configurable: true,
+      get: () => (query as Record<string, unknown>)[key],
+    })
+  }
+  return result
+}
 
 export const getGetStatsUrl = () => {
   return `/stats`
@@ -35,69 +63,336 @@ export const getStats = async (
   })
 }
 
-export const getGetStatsMutationKey = () => ["getStats"] as const
-
-export const getGetStatsMutationOptions = <
-  TError = ErrorModel,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof getStats>>,
-    TError,
-    void,
-    TContext
-  >
-  request?: SecondParameter<typeof bffFetch>
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof getStats>>,
-  TError,
-  void,
-  TContext
-> => {
-  const mutationKey = getGetStatsMutationKey()
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined }
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof getStats>>,
-    void
-  > = () => {
-    return getStats(requestOptions)
-  }
-
-  return { mutationFn, ...mutationOptions }
+export const getGetStatsInfiniteQueryKey = () => {
+  return ["infinite", `/stats`] as const
 }
 
-export type GetStatsMutationResult = NonNullable<
+export const getGetStatsQueryKey = () => {
+  return [`/stats`] as const
+}
+
+export const getGetStatsInfiniteQueryOptions = <
+  TData = InfiniteData<Awaited<ReturnType<typeof getStats>>>,
+  TError = ErrorModel,
+>(options?: {
+  query?: Partial<
+    UseInfiniteQueryOptions<Awaited<ReturnType<typeof getStats>>, TError, TData>
+  >
+  request?: SecondParameter<typeof bffFetch>
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey = queryOptions?.queryKey ?? getGetStatsInfiniteQueryKey()
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getStats>>> = ({
+    signal,
+  }) => getStats({ signal, ...requestOptions })
+
+  return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
+    Awaited<ReturnType<typeof getStats>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetStatsInfiniteQueryResult = NonNullable<
   Awaited<ReturnType<typeof getStats>>
 >
+export type GetStatsInfiniteQueryError = ErrorModel
 
-export type GetStatsMutationError = ErrorModel
-
-/**
- * @summary Get service status and upstream budgets
- */
-export const useGetStats = <TError = ErrorModel, TContext = unknown>(
+export function useGetStatsInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getStats>>>,
+  TError = ErrorModel,
+>(
+  options: {
+    query: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getStats>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getStats>>,
+          TError,
+          Awaited<ReturnType<typeof getStats>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetStatsInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getStats>>>,
+  TError = ErrorModel,
+>(
   options?: {
-    mutation?: UseMutationOptions<
-      Awaited<ReturnType<typeof getStats>>,
-      TError,
-      void,
-      TContext
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getStats>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getStats>>,
+          TError,
+          Awaited<ReturnType<typeof getStats>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetStatsInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getStats>>>,
+  TError = ErrorModel,
+>(
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getStats>>,
+        TError,
+        TData
+      >
     >
     request?: SecondParameter<typeof bffFetch>
   },
   queryClient?: QueryClient
-): UseMutationResult<
-  Awaited<ReturnType<typeof getStats>>,
-  TError,
-  void,
-  TContext
-> => {
-  return useMutation(getGetStatsMutationOptions(options), queryClient)
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Get service status and upstream budgets
+ */
+
+export function useGetStatsInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getStats>>>,
+  TError = ErrorModel,
+>(
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getStats>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getGetStatsInfiniteQueryOptions(options)
+
+  const query = useInfiniteQuery(
+    queryOptions,
+    queryClient
+  ) as UseInfiniteQueryResult<TData, TError> & {
+    queryKey: DataTag<QueryKey, TData, TError>
+  }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Get service status and upstream budgets
+ */
+export const prefetchGetStatsInfiniteQuery = async <
+  TData = Awaited<ReturnType<typeof getStats>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getStats>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getGetStatsInfiniteQueryOptions(options)
+
+  await queryClient.prefetchInfiniteQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useGetStatsInfinite} query
+ */
+export const invalidateGetStatsInfinite = async (
+  queryClient: QueryClient,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getGetStatsInfiniteQueryKey() },
+    options
+  )
+
+  return queryClient
+}
+
+export const getGetStatsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getStats>>,
+  TError = ErrorModel,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof getStats>>, TError, TData>
+  >
+  request?: SecondParameter<typeof bffFetch>
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey = queryOptions?.queryKey ?? getGetStatsQueryKey()
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getStats>>> = ({
+    signal,
+  }) => getStats({ signal, ...requestOptions })
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getStats>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetStatsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getStats>>
+>
+export type GetStatsQueryError = ErrorModel
+
+export function useGetStats<
+  TData = Awaited<ReturnType<typeof getStats>>,
+  TError = ErrorModel,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getStats>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getStats>>,
+          TError,
+          Awaited<ReturnType<typeof getStats>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetStats<
+  TData = Awaited<ReturnType<typeof getStats>>,
+  TError = ErrorModel,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getStats>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getStats>>,
+          TError,
+          Awaited<ReturnType<typeof getStats>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetStats<
+  TData = Awaited<ReturnType<typeof getStats>>,
+  TError = ErrorModel,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getStats>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Get service status and upstream budgets
+ */
+
+export function useGetStats<
+  TData = Awaited<ReturnType<typeof getStats>>,
+  TError = ErrorModel,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getStats>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getGetStatsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Get service status and upstream budgets
+ */
+export const prefetchGetStatsQuery = async <
+  TData = Awaited<ReturnType<typeof getStats>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getStats>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getGetStatsQueryOptions(options)
+
+  await queryClient.prefetchQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useGetStats} query
+ */
+export const invalidateGetStats = async (
+  queryClient: QueryClient,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getGetStatsQueryKey() },
+    options
+  )
+
+  return queryClient
 }
