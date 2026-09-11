@@ -1,4 +1,5 @@
 export * from "./aircraft/aircraft.ts"
+export * from "./airlines/airlines.ts"
 export * from "./airports/airports.ts"
 export * from "./flights/flights.ts"
 export * from "./search/search.ts"

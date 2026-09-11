@@ -71,7 +71,7 @@ func main() {
 		load     func() error
 		prefixes []string
 	}{
-		"airports": {func() error { return loadAirports(ctx, st, *airportsSrc, log) }, []string{flights.PrefixAirport, flights.PrefixSearch}},
+		"airports": {func() error { return loadAirports(ctx, st, *airportsSrc, log) }, []string{flights.PrefixAirport, flights.PrefixAirports, flights.PrefixSearch}},
 		"airlines": {func() error { return loadAirlines(ctx, st, *airlinesSrc, log) }, []string{flights.PrefixAirline, flights.PrefixSearch}},
 		"aircraft": {func() error { return loadAircraft(ctx, st, *aircraftSrc, log) }, []string{flights.PrefixAircraft, flights.PrefixSearch}},
 	}

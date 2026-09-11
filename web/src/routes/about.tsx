@@ -67,8 +67,13 @@ function About() {
           <li>Airlines: OpenFlights</li>
           <li>Aircraft registry: the OpenSky aircraft database</li>
           <li>
-            Map imagery: Esri basemap tiles, credited on the map when a tile
-            style is active
+            Aircraft photos: Planespotters.net, each credited to its
+            photographer and linked to the photo page
+          </li>
+          <li>Weather radar: RainViewer</li>
+          <li>
+            Map imagery: Esri basemap tiles and NASA GIBS daily imagery,
+            credited on the map when a tile style is active
           </li>
         </ul>
       </PageSection>

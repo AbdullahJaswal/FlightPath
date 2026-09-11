@@ -63,6 +63,38 @@ type AircraftDetail struct {
 	TrailSource TrailSource   `json:"trailSource"`
 }
 
+// PhotoImage is one rendition of a photo.
+type PhotoImage struct {
+	Src    string `json:"src"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+// Photo is an aircraft photo hotlinked from its source.
+type Photo struct {
+	ID           string      `json:"id" example:"1948036"`
+	Thumbnail    PhotoImage  `json:"thumbnail" doc:"About 200 px wide."`
+	Large        PhotoImage  `json:"large" doc:"About 280 px tall."`
+	Link         string      `json:"link" doc:"Photo page on Planespotters.net. The image must link here and credit the photographer."`
+	Photographer string      `json:"photographer"`
+	Source       PhotoSource `json:"source"`
+}
+
+// Track is the stored path of one aircraft.
+type Track struct {
+	ICAO24   string       `json:"icao24" example:"3c6444"`
+	Callsign string       `json:"callsign,omitempty" example:"DLH2AB"`
+	Points   []TrailPoint `json:"points" doc:"Chronological positions."`
+}
+
+// History is the set of tracks that passed through a bounding box during a window.
+type History struct {
+	From   time.Time `json:"from"`
+	To     time.Time `json:"to"`
+	Count  int       `json:"count" doc:"Tracks returned."`
+	Tracks []Track   `json:"tracks"`
+}
+
 // Airport is airport reference data.
 type Airport struct {
 	ICAO         string  `json:"icao" doc:"ICAO identifier." example:"EDDF"`
@@ -74,6 +106,12 @@ type Airport struct {
 	Lat          float64 `json:"lat"`
 	Lon          float64 `json:"lon"`
 	ElevationFt  *int    `json:"elevationFt,omitempty"`
+}
+
+// AirportList is the airports inside a bounding box.
+type AirportList struct {
+	Count    int       `json:"count"`
+	Airports []Airport `json:"airports"`
 }
 
 // Airline is airline reference data.

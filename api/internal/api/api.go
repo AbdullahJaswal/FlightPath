@@ -29,7 +29,9 @@ type Deps struct {
 const (
 	ccLive      = "private, no-cache"
 	ccFlight    = "private, max-age=30, stale-while-revalidate=30"
+	ccHistory   = "private, max-age=60"
 	ccSchedule  = "private, max-age=300"
+	ccAirports  = "public, max-age=300"
 	ccReference = "public, max-age=3600"
 	ccNoStore   = "no-store"
 )
@@ -56,6 +58,26 @@ func Register(h huma.API, d Deps) {
 	}, d.getAircraft)
 
 	huma.Register(h, huma.Operation{
+		OperationID: "getAircraftPhoto",
+		Method:      http.MethodGet,
+		Path:        "/aircraft/{icao24}/photo",
+		Summary:     "Get a photo of an aircraft",
+		Description: "Thumbnail from Planespotters.net, found by address and then by registration. Images are hotlinked and must be shown with the photographer credit and a link to the photo page.",
+		Tags:        []string{"aircraft"},
+		Errors:      []int{http.StatusNotFound, http.StatusUnprocessableEntity, http.StatusServiceUnavailable},
+	}, d.getAircraftPhoto)
+
+	huma.Register(h, huma.Operation{
+		OperationID: "getHistory",
+		Method:      http.MethodGet,
+		Path:        "/history",
+		Summary:     "Get recent tracks in a bounding box",
+		Description: "Downsampled stored positions of aircraft that flew through the box during the window, for replaying the last hours. Tracks with the most points come first.",
+		Tags:        []string{"aircraft"},
+		Errors:      []int{http.StatusUnprocessableEntity},
+	}, d.getHistory)
+
+	huma.Register(h, huma.Operation{
 		OperationID: "getFlight",
 		Method:      http.MethodGet,
 		Path:        "/flights/{callsign}",
@@ -76,6 +98,16 @@ func Register(h huma.API, d Deps) {
 	}, d.getFlightSchedule)
 
 	huma.Register(h, huma.Operation{
+		OperationID: "listAirports",
+		Method:      http.MethodGet,
+		Path:        "/airports",
+		Summary:     "List airports in a bounding box",
+		Description: "Airports from OurAirports inside the box, large and medium ones first. Small airports are included only when the box spans less than four degrees.",
+		Tags:        []string{"airports"},
+		Errors:      []int{http.StatusUnprocessableEntity},
+	}, d.listAirports)
+
+	huma.Register(h, huma.Operation{
 		OperationID: "getAirport",
 		Method:      http.MethodGet,
 		Path:        "/airports/{code}",
@@ -83,6 +115,15 @@ func Register(h huma.API, d Deps) {
 		Tags:        []string{"airports"},
 		Errors:      []int{http.StatusNotFound, http.StatusUnprocessableEntity},
 	}, d.getAirport)
+
+	huma.Register(h, huma.Operation{
+		OperationID: "getAirline",
+		Method:      http.MethodGet,
+		Path:        "/airlines/{icao}",
+		Summary:     "Get an airline by ICAO code",
+		Tags:        []string{"airlines"},
+		Errors:      []int{http.StatusNotFound, http.StatusUnprocessableEntity},
+	}, d.getAirline)
 
 	huma.Register(h, huma.Operation{
 		OperationID: "search",
@@ -102,6 +143,14 @@ func Register(h huma.API, d Deps) {
 	}, d.getStats)
 }
 
+// bounds validates the box edges and converts them.
+func bounds(west, south, east, north float64) (snapshot.Bounds, error) {
+	if south > north {
+		return snapshot.Bounds{}, huma.Error422UnprocessableEntity("south must not exceed north")
+	}
+	return snapshot.Bounds{West: west, South: south, East: east, North: north}, nil
+}
+
 type listAircraftInput struct {
 	West  float64 `query:"west" default:"-180" minimum:"-180" maximum:"180" doc:"Western edge in degrees. Greater than east when the box crosses the antimeridian."`
 	South float64 `query:"south" default:"-90" minimum:"-90" maximum:"90" doc:"Southern edge in degrees."`
@@ -116,17 +165,43 @@ type listAircraftOutput struct {
 }
 
 func (d Deps) listAircraft(_ context.Context, in *listAircraftInput) (*listAircraftOutput, error) {
-	if in.South > in.North {
-		return nil, huma.Error422UnprocessableEntity("south must not exceed north")
+	b, err := bounds(in.West, in.South, in.East, in.North)
+	if err != nil {
+		return nil, err
 	}
 	out := &listAircraftOutput{CacheControl: ccLive, Body: model.AircraftList{Stale: true, Aircraft: []model.Aircraft{}}}
 	snap := d.Snaps.Current()
 	if snap == nil {
 		return out, nil
 	}
-	b := snapshot.Bounds{West: in.West, South: in.South, East: in.East, North: in.North}
 	out.Body = snap.List(b, in.Limit, time.Now(), d.StaleAfter)
 	return out, nil
+}
+
+type historyInput struct {
+	West    float64 `query:"west" default:"-180" minimum:"-180" maximum:"180" doc:"Western edge in degrees. Greater than east when the box crosses the antimeridian."`
+	South   float64 `query:"south" default:"-90" minimum:"-90" maximum:"90" doc:"Southern edge in degrees."`
+	East    float64 `query:"east" default:"180" minimum:"-180" maximum:"180" doc:"Eastern edge in degrees."`
+	North   float64 `query:"north" default:"90" minimum:"-90" maximum:"90" doc:"Northern edge in degrees."`
+	Minutes int     `query:"minutes" default:"60" minimum:"5" maximum:"180" doc:"Length of the window ending now."`
+	Limit   int     `query:"limit" default:"300" minimum:"1" maximum:"1000" doc:"Maximum tracks to return."`
+}
+
+type historyOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         *model.History
+}
+
+func (d Deps) getHistory(ctx context.Context, in *historyInput) (*historyOutput, error) {
+	b, err := bounds(in.West, in.South, in.East, in.North)
+	if err != nil {
+		return nil, err
+	}
+	h, err := d.Flights.History(ctx, b, in.Minutes, in.Limit)
+	if err != nil {
+		return nil, d.fail(err)
+	}
+	return &historyOutput{CacheControl: ccHistory, Body: h}, nil
 }
 
 type icao24Input struct {
@@ -144,6 +219,19 @@ func (d Deps) getAircraft(ctx context.Context, in *icao24Input) (*aircraftOutput
 		return nil, d.fail(err)
 	}
 	return &aircraftOutput{CacheControl: ccLive, Body: detail}, nil
+}
+
+type photoOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         *model.Photo
+}
+
+func (d Deps) getAircraftPhoto(ctx context.Context, in *icao24Input) (*photoOutput, error) {
+	p, err := d.Flights.Photo(ctx, in.ICAO24)
+	if err != nil {
+		return nil, d.fail(err)
+	}
+	return &photoOutput{CacheControl: ccReference, Body: p}, nil
 }
 
 type callsignInput struct {
@@ -176,6 +264,31 @@ func (d Deps) getFlightSchedule(ctx context.Context, in *callsignInput) (*schedu
 	return &scheduleOutput{CacheControl: ccSchedule, Body: s}, nil
 }
 
+type listAirportsInput struct {
+	West  float64 `query:"west" default:"-180" minimum:"-180" maximum:"180" doc:"Western edge in degrees. Greater than east when the box crosses the antimeridian."`
+	South float64 `query:"south" default:"-90" minimum:"-90" maximum:"90" doc:"Southern edge in degrees."`
+	East  float64 `query:"east" default:"180" minimum:"-180" maximum:"180" doc:"Eastern edge in degrees."`
+	North float64 `query:"north" default:"90" minimum:"-90" maximum:"90" doc:"Northern edge in degrees."`
+	Limit int     `query:"limit" default:"200" minimum:"1" maximum:"1000" doc:"Maximum airports to return."`
+}
+
+type airportListOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         *model.AirportList
+}
+
+func (d Deps) listAirports(ctx context.Context, in *listAirportsInput) (*airportListOutput, error) {
+	b, err := bounds(in.West, in.South, in.East, in.North)
+	if err != nil {
+		return nil, err
+	}
+	list, err := d.Flights.Airports(ctx, b, in.Limit)
+	if err != nil {
+		return nil, d.fail(err)
+	}
+	return &airportListOutput{CacheControl: ccAirports, Body: list}, nil
+}
+
 type airportInput struct {
 	Code string `path:"code" pattern:"^[A-Za-z0-9]{3,4}$" doc:"ICAO ident or IATA code." example:"FRA"`
 }
@@ -191,6 +304,23 @@ func (d Deps) getAirport(ctx context.Context, in *airportInput) (*airportOutput,
 		return nil, d.fail(err)
 	}
 	return &airportOutput{CacheControl: ccReference, Body: a}, nil
+}
+
+type airlineInput struct {
+	ICAO string `path:"icao" pattern:"^[A-Za-z0-9]{3}$" doc:"ICAO airline designator." example:"DLH"`
+}
+
+type airlineOutput struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         *model.Airline
+}
+
+func (d Deps) getAirline(ctx context.Context, in *airlineInput) (*airlineOutput, error) {
+	a, err := d.Flights.Airline(ctx, in.ICAO)
+	if err != nil {
+		return nil, d.fail(err)
+	}
+	return &airlineOutput{CacheControl: ccReference, Body: a}, nil
 }
 
 type searchInput struct {

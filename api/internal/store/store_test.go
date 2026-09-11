@@ -93,6 +93,70 @@ func TestAirports(t *testing.T) {
 	require.Len(t, byICAO, 2)
 }
 
+func TestAirportsInBounds(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	require.NoError(t, st.ReplaceAirports(ctx, []Airport{
+		{ID: 1, Ident: "EDDF", Type: "large_airport", Name: "Frankfurt am Main Airport", Lat: 50.03, Lon: 8.57},
+		{ID: 2, Ident: "EDFE", Type: "small_airport", Name: "Frankfurt-Egelsbach Airport", Lat: 49.96, Lon: 8.64},
+		{ID: 3, Ident: "EDLN", Type: "medium_airport", Name: "Moenchengladbach Airport", Lat: 51.23, Lon: 6.5},
+		{ID: 4, Ident: "EGLL", Type: "large_airport", Name: "London Heathrow Airport", Lat: 51.47, Lon: -0.46},
+		{ID: 5, Ident: "NFFN", Type: "large_airport", Name: "Nadi International Airport", Lat: -17.76, Lon: 177.44},
+		{ID: 6, Ident: "NSTU", Type: "medium_airport", Name: "Pago Pago International Airport", Lat: -14.33, Lon: -170.71},
+		{ID: 7, Ident: "NZAA", Type: "large_airport", Name: "Auckland International Airport", Lat: -37.01, Lon: 174.79},
+	}))
+	big := []string{"large_airport", "medium_airport"}
+
+	rows, err := st.AirportsInBounds(ctx, 5, 48, 12, 52, big, 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, "EDDF", rows[0].Ident)
+	require.Equal(t, "EDLN", rows[1].Ident)
+
+	rows, err = st.AirportsInBounds(ctx, 5, 48, 12, 52, append(big, "small_airport"), 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 3)
+	require.Equal(t, "EDFE", rows[2].Ident)
+
+	rows, err = st.AirportsInBounds(ctx, 5, 48, 12, 52, big, 1)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+
+	rows, err = st.AirportsInBounds(ctx, 170, -20, -165, -10, big, 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, "NFFN", rows[0].Ident)
+	require.Equal(t, "NSTU", rows[1].Ident)
+}
+
+func TestPositionsInBounds(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	require.NoError(t, st.InsertPositions(ctx, []Position{
+		{ICAO24: "bbb222", TS: now.Add(-10 * time.Minute), Lat: 50, Lon: 8, Callsign: "DLH2AB"},
+		{ICAO24: "aaa111", TS: now.Add(-5 * time.Minute), Lat: 51, Lon: 9},
+		{ICAO24: "aaa111", TS: now.Add(-2 * time.Hour), Lat: 51, Lon: 9},
+		{ICAO24: "aaa111", TS: now.Add(-20 * time.Minute), Lat: 51.5, Lon: 9.5},
+		{ICAO24: "ccc333", TS: now.Add(-5 * time.Minute), Lat: 20, Lon: 8},
+		{ICAO24: "ddd444", TS: now.Add(-5 * time.Minute), Lat: 50, Lon: 179.5},
+	}))
+
+	rows, err := st.PositionsInBounds(ctx, now.Add(-time.Hour), 5, 48, 12, 52)
+	require.NoError(t, err)
+	require.Len(t, rows, 3)
+	require.Equal(t, "aaa111", rows[0].ICAO24)
+	require.True(t, rows[0].TS.Before(rows[1].TS))
+	require.Equal(t, "bbb222", rows[2].ICAO24)
+	require.Equal(t, "DLH2AB", rows[2].Callsign)
+	require.Empty(t, rows[0].Callsign)
+
+	rows, err = st.PositionsInBounds(ctx, now.Add(-time.Hour), 170, 40, -170, 60)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "ddd444", rows[0].ICAO24)
+}
+
 func TestPositionsAndMeta(t *testing.T) {
 	st := testStore(t)
 	ctx := context.Background()

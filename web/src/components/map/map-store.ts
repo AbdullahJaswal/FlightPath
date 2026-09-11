@@ -9,6 +9,8 @@ export type MapState = {
   x: number
   y: number
   k: number
+  // false on the globe, where longitudes do not repeat
+  wrap: boolean
   land: Path2D[]
   grid: Path2D | null
   borders: Path2D | null
@@ -18,24 +20,41 @@ export type MapState = {
 // country name anchored at the projected centroid, area in projected units
 export type MapLabel = { text: string; x: number; y: number; area: number }
 
-export function createMapStore() {
-  let state: MapState = {
-    width: 0,
-    height: 0,
-    projection: null,
-    x: 0,
-    y: 0,
-    k: 1,
-    land: [],
-    grid: null,
-    borders: null,
-    labels: [],
-  }
+export type MapStore = {
+  get: () => MapState
+  set: (patch: Partial<MapState>) => void
+  subscribe: (listener: () => void) => () => void
+  // screen coordinates of a lon/lat, null when not visible
+  project: (lon: number, lat: number) => [number, number] | null
+  unproject: (px: number, py: number) => [number, number] | null
+  // screen rotation of local north in radians, absent when north is straight up
+  northAngle?: (lon: number, lat: number) => number
+}
+
+export const globeMinZoom = 1
+export const globeMaxZoom = 48
+
+export const initialMapState: MapState = {
+  width: 0,
+  height: 0,
+  projection: null,
+  x: 0,
+  y: 0,
+  k: 1,
+  wrap: true,
+  land: [],
+  grid: null,
+  borders: null,
+  labels: [],
+}
+
+export function createMapStore(): MapStore {
+  let state = initialMapState
   const listeners = new Set<() => void>()
 
   return {
     get: () => state,
-    set(patch: Partial<MapState>) {
+    set(patch) {
       let changed = false
       for (const key of Object.keys(patch) as (keyof MapState)[]) {
         if (patch[key] !== state[key]) changed = true
@@ -44,19 +63,18 @@ export function createMapStore() {
       state = { ...state, ...patch }
       for (const l of listeners) l()
     },
-    subscribe(listener: () => void) {
+    subscribe(listener) {
       listeners.add(listener)
       return () => {
         listeners.delete(listener)
       }
     },
-    // screen coordinates of a lon/lat under the current zoom transform
-    project(lon: number, lat: number): [number, number] | null {
+    project(lon, lat) {
       const p = state.projection?.([lon, lat])
       if (!p) return null
       return [p[0] * state.k + state.x, p[1] * state.k + state.y]
     },
-    unproject(px: number, py: number): [number, number] | null {
+    unproject(px, py) {
       const inv = state.projection?.invert
       if (!inv) return null
       const p = inv([(px - state.x) / state.k, (py - state.y) / state.k])
@@ -65,10 +83,9 @@ export function createMapStore() {
   }
 }
 
-export type MapStore = ReturnType<typeof createMapStore>
-
-// width of one copy of the world in screen pixels at the current zoom
+// width of one copy of the world in screen pixels at the current zoom, zero when it does not repeat
 export function worldWidth(state: MapState) {
+  if (!state.wrap) return 0
   return 2 * Math.PI * (state.projection?.scale() ?? 0) * state.k
 }
 

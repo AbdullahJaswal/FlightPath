@@ -41,7 +41,10 @@ function Terms() {
           Aircraft positions are provided by The OpenSky Network under its terms
           for non-commercial use. Routes come from adsbdb, schedules from
           aviationstack, airports from OurAirports and airlines from
-          OpenFlights. Their data remains subject to their own terms.
+          OpenFlights. Aircraft photos are shown from Planespotters.net with the
+          photographer credited and belong to their authors. Weather radar comes
+          from RainViewer and daily imagery from NASA GIBS, both for personal
+          use. Their data remains subject to their own terms.
         </p>
       </PageSection>
 

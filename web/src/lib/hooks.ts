@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 export function useDebounced<T>(value: T, delayMs: number) {
   const [debounced, setDebounced] = useState(value)
@@ -22,16 +22,16 @@ export function useNow(intervalMs: number) {
 // Keeps a loading state visible for a minimum time so content never flashes in.
 export function useSettled(pending: boolean, minMs = 500) {
   const [show, setShow] = useState(pending)
-  const [since, setSince] = useState(() => (pending ? Date.now() : 0))
+  const since = useRef(pending ? Date.now() : 0)
   useEffect(() => {
     if (pending) {
-      setSince(Date.now())
+      since.current = Date.now()
       setShow(true)
       return
     }
-    const wait = Math.max(0, minMs - (Date.now() - since))
+    const wait = Math.max(0, minMs - (Date.now() - since.current))
     const t = setTimeout(() => setShow(false), wait)
     return () => clearTimeout(t)
-  }, [pending, minMs, since])
+  }, [pending, minMs])
   return show
 }

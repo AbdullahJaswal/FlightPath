@@ -27,7 +27,10 @@ import type {
   AircraftDetail,
   AircraftList,
   ErrorModel,
+  GetHistoryParams,
+  History,
   ListAircraftParams,
+  Photo,
 } from "../schemas"
 
 import { bffFetch } from "../../server/bff-fetch.ts"
@@ -819,6 +822,802 @@ export const invalidateGetAircraft = async (
 ): Promise<QueryClient> => {
   await queryClient.invalidateQueries(
     { queryKey: getGetAircraftQueryKey(icao24) },
+    options
+  )
+
+  return queryClient
+}
+
+export const getGetAircraftPhotoUrl = (icao24: string) => {
+  return `/aircraft/${icao24}/photo`
+}
+
+/**
+ * Thumbnail from Planespotters.net, found by address and then by registration. Images are hotlinked and must be shown with the photographer credit and a link to the photo page.
+ * @summary Get a photo of an aircraft
+ */
+export const getAircraftPhoto = async (
+  icao24: string,
+  options?: Parameters<typeof bffFetch>[1]
+): Promise<Photo> => {
+  return bffFetch<Photo>(getGetAircraftPhotoUrl(icao24), {
+    ...options,
+    method: "GET",
+  })
+}
+
+export const getGetAircraftPhotoInfiniteQueryKey = (icao24: string) => {
+  return ["infinite", `/aircraft/${icao24}/photo`] as const
+}
+
+export const getGetAircraftPhotoQueryKey = (icao24: string) => {
+  return [`/aircraft/${icao24}/photo`] as const
+}
+
+export const getGetAircraftPhotoInfiniteQueryOptions = <
+  TData = InfiniteData<Awaited<ReturnType<typeof getAircraftPhoto>>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAircraftPhoto>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAircraftPhotoInfiniteQueryKey(icao24)
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAircraftPhoto>>
+  > = ({ signal }) => getAircraftPhoto(icao24, { signal, ...requestOptions })
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: icao24 !== null && icao24 !== undefined,
+    ...queryOptions,
+  } as UseInfiniteQueryOptions<
+    Awaited<ReturnType<typeof getAircraftPhoto>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetAircraftPhotoInfiniteQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAircraftPhoto>>
+>
+export type GetAircraftPhotoInfiniteQueryError = ErrorModel
+
+export function useGetAircraftPhotoInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getAircraftPhoto>>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options: {
+    query: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAircraftPhoto>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAircraftPhoto>>,
+          TError,
+          Awaited<ReturnType<typeof getAircraftPhoto>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetAircraftPhotoInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getAircraftPhoto>>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAircraftPhoto>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAircraftPhoto>>,
+          TError,
+          Awaited<ReturnType<typeof getAircraftPhoto>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetAircraftPhotoInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getAircraftPhoto>>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAircraftPhoto>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Get a photo of an aircraft
+ */
+
+export function useGetAircraftPhotoInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getAircraftPhoto>>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAircraftPhoto>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getGetAircraftPhotoInfiniteQueryOptions(icao24, options)
+
+  const query = useInfiniteQuery(
+    queryOptions,
+    queryClient
+  ) as UseInfiniteQueryResult<TData, TError> & {
+    queryKey: DataTag<QueryKey, TData, TError>
+  }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Get a photo of an aircraft
+ */
+export const prefetchGetAircraftPhotoInfiniteQuery = async <
+  TData = Awaited<ReturnType<typeof getAircraftPhoto>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getAircraftPhoto>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getGetAircraftPhotoInfiniteQueryOptions(icao24, options)
+
+  await queryClient.prefetchInfiniteQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useGetAircraftPhotoInfinite} query
+ */
+export const invalidateGetAircraftPhotoInfinite = async (
+  queryClient: QueryClient,
+  icao24: string,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getGetAircraftPhotoInfiniteQueryKey(icao24) },
+    options
+  )
+
+  return queryClient
+}
+
+export const getGetAircraftPhotoQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAircraftPhoto>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAircraftPhoto>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey = queryOptions?.queryKey ?? getGetAircraftPhotoQueryKey(icao24)
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAircraftPhoto>>
+  > = ({ signal }) => getAircraftPhoto(icao24, { signal, ...requestOptions })
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: icao24 !== null && icao24 !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAircraftPhoto>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetAircraftPhotoQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAircraftPhoto>>
+>
+export type GetAircraftPhotoQueryError = ErrorModel
+
+export function useGetAircraftPhoto<
+  TData = Awaited<ReturnType<typeof getAircraftPhoto>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAircraftPhoto>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAircraftPhoto>>,
+          TError,
+          Awaited<ReturnType<typeof getAircraftPhoto>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetAircraftPhoto<
+  TData = Awaited<ReturnType<typeof getAircraftPhoto>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAircraftPhoto>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAircraftPhoto>>,
+          TError,
+          Awaited<ReturnType<typeof getAircraftPhoto>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetAircraftPhoto<
+  TData = Awaited<ReturnType<typeof getAircraftPhoto>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAircraftPhoto>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Get a photo of an aircraft
+ */
+
+export function useGetAircraftPhoto<
+  TData = Awaited<ReturnType<typeof getAircraftPhoto>>,
+  TError = ErrorModel,
+>(
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAircraftPhoto>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getGetAircraftPhotoQueryOptions(icao24, options)
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Get a photo of an aircraft
+ */
+export const prefetchGetAircraftPhotoQuery = async <
+  TData = Awaited<ReturnType<typeof getAircraftPhoto>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  icao24: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAircraftPhoto>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getGetAircraftPhotoQueryOptions(icao24, options)
+
+  await queryClient.prefetchQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useGetAircraftPhoto} query
+ */
+export const invalidateGetAircraftPhoto = async (
+  queryClient: QueryClient,
+  icao24: string,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getGetAircraftPhotoQueryKey(icao24) },
+    options
+  )
+
+  return queryClient
+}
+
+export const getGetHistoryUrl = (params?: GetHistoryParams) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/history?${stringifiedParams}`
+    : `/history`
+}
+
+/**
+ * Downsampled stored positions of aircraft that flew through the box during the window, for replaying the last hours. Tracks with the most points come first.
+ * @summary Get recent tracks in a bounding box
+ */
+export const getHistory = async (
+  params?: GetHistoryParams,
+  options?: Parameters<typeof bffFetch>[1]
+): Promise<History> => {
+  return bffFetch<History>(getGetHistoryUrl(params), {
+    ...options,
+    method: "GET",
+  })
+}
+
+export const getGetHistoryInfiniteQueryKey = (params?: GetHistoryParams) => {
+  return ["infinite", `/history`, ...(params ? [params] : [])] as const
+}
+
+export const getGetHistoryQueryKey = (params?: GetHistoryParams) => {
+  return [`/history`, ...(params ? [params] : [])] as const
+}
+
+export const getGetHistoryInfiniteQueryOptions = <
+  TData = InfiniteData<Awaited<ReturnType<typeof getHistory>>>,
+  TError = ErrorModel,
+>(
+  params?: GetHistoryParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getHistory>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetHistoryInfiniteQueryKey(params)
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getHistory>>> = ({
+    signal,
+  }) => getHistory(params, { signal, ...requestOptions })
+
+  return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
+    Awaited<ReturnType<typeof getHistory>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetHistoryInfiniteQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getHistory>>
+>
+export type GetHistoryInfiniteQueryError = ErrorModel
+
+export function useGetHistoryInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getHistory>>>,
+  TError = ErrorModel,
+>(
+  params: undefined | GetHistoryParams,
+  options: {
+    query: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getHistory>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHistory>>,
+          TError,
+          Awaited<ReturnType<typeof getHistory>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetHistoryInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getHistory>>>,
+  TError = ErrorModel,
+>(
+  params?: GetHistoryParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getHistory>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHistory>>,
+          TError,
+          Awaited<ReturnType<typeof getHistory>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetHistoryInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getHistory>>>,
+  TError = ErrorModel,
+>(
+  params?: GetHistoryParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getHistory>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Get recent tracks in a bounding box
+ */
+
+export function useGetHistoryInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof getHistory>>>,
+  TError = ErrorModel,
+>(
+  params?: GetHistoryParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getHistory>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getGetHistoryInfiniteQueryOptions(params, options)
+
+  const query = useInfiniteQuery(
+    queryOptions,
+    queryClient
+  ) as UseInfiniteQueryResult<TData, TError> & {
+    queryKey: DataTag<QueryKey, TData, TError>
+  }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Get recent tracks in a bounding box
+ */
+export const prefetchGetHistoryInfiniteQuery = async <
+  TData = Awaited<ReturnType<typeof getHistory>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  params?: GetHistoryParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof getHistory>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getGetHistoryInfiniteQueryOptions(params, options)
+
+  await queryClient.prefetchInfiniteQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useGetHistoryInfinite} query
+ */
+export const invalidateGetHistoryInfinite = async (
+  queryClient: QueryClient,
+  params?: GetHistoryParams,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getGetHistoryInfiniteQueryKey(params) },
+    options
+  )
+
+  return queryClient
+}
+
+export const getGetHistoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getHistory>>,
+  TError = ErrorModel,
+>(
+  params?: GetHistoryParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getHistory>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey = queryOptions?.queryKey ?? getGetHistoryQueryKey(params)
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getHistory>>> = ({
+    signal,
+  }) => getHistory(params, { signal, ...requestOptions })
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getHistory>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetHistoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getHistory>>
+>
+export type GetHistoryQueryError = ErrorModel
+
+export function useGetHistory<
+  TData = Awaited<ReturnType<typeof getHistory>>,
+  TError = ErrorModel,
+>(
+  params: undefined | GetHistoryParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getHistory>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHistory>>,
+          TError,
+          Awaited<ReturnType<typeof getHistory>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetHistory<
+  TData = Awaited<ReturnType<typeof getHistory>>,
+  TError = ErrorModel,
+>(
+  params?: GetHistoryParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getHistory>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getHistory>>,
+          TError,
+          Awaited<ReturnType<typeof getHistory>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useGetHistory<
+  TData = Awaited<ReturnType<typeof getHistory>>,
+  TError = ErrorModel,
+>(
+  params?: GetHistoryParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getHistory>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary Get recent tracks in a bounding box
+ */
+
+export function useGetHistory<
+  TData = Awaited<ReturnType<typeof getHistory>>,
+  TError = ErrorModel,
+>(
+  params?: GetHistoryParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getHistory>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getGetHistoryQueryOptions(params, options)
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary Get recent tracks in a bounding box
+ */
+export const prefetchGetHistoryQuery = async <
+  TData = Awaited<ReturnType<typeof getHistory>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  params?: GetHistoryParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getHistory>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getGetHistoryQueryOptions(params, options)
+
+  await queryClient.prefetchQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useGetHistory} query
+ */
+export const invalidateGetHistory = async (
+  queryClient: QueryClient,
+  params?: GetHistoryParams,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getGetHistoryQueryKey(params) },
     options
   )
 

@@ -78,6 +78,7 @@ export function SearchBox({
       </div>
       <Command shouldFilter={false} className="rounded-none bg-transparent p-0">
         <CommandInput
+          id="search-input"
           value={text}
           onValueChange={setText}
           placeholder="Callsign, registration, airport or airline"

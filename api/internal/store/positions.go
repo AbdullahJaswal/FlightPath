@@ -24,6 +24,14 @@ func (s *Store) Trail(ctx context.Context, icao24 string, since time.Time) ([]Po
 	return rows, err
 }
 
+// PositionsInBounds returns stored positions inside the box since the given time, grouped by aircraft and oldest first.
+func (s *Store) PositionsInBounds(ctx context.Context, since time.Time, west, south, east, north float64) ([]Position, error) {
+	var rows []Position
+	err := inBounds(s.db.NewSelect().Model(&rows).Where("ts >= ?", since), west, south, east, north).
+		Order("icao24 ASC", "ts ASC").Scan(ctx)
+	return rows, err
+}
+
 func (s *Store) DeletePositionsBefore(ctx context.Context, t time.Time) (int64, error) {
 	res, err := s.db.NewDelete().Model((*Position)(nil)).Where("ts < ?", t).Exec(ctx)
 	if err != nil {

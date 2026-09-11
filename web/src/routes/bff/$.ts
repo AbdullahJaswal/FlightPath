@@ -1,7 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router"
 import { apiUrl } from "@/lib/server/api-url"
 
-const requestHeaders = ["accept", "accept-language", "if-none-match"]
+const requestHeaders = [
+  "accept",
+  "accept-language",
+  "if-none-match",
+  "x-forwarded-for",
+  "x-real-ip",
+]
 const responseHeaders = [
   "content-type",
   "cache-control",
@@ -27,10 +33,14 @@ export const Route = createFileRoute("/bff/$")({
           if (value) headers.set(name, value)
         }
 
-        const upstream = await fetch(target, {
-          headers,
-          signal: request.signal,
-        })
+        let upstream: Response
+        try {
+          upstream = await fetch(target, { headers, signal: request.signal })
+        } catch (err) {
+          // the browser gave up on the request, nobody is waiting for the answer
+          if (request.signal.aborted) return new Response(null, { status: 204 })
+          throw err
+        }
 
         const out = new Headers()
         for (const name of responseHeaders) {

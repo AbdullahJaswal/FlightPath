@@ -1,4 +1,5 @@
 import { IconBuildingSkyscraper, IconPlane, IconX } from "@tabler/icons-react"
+import { Hint } from "@/components/hint"
 import { Button } from "@/components/ui/button"
 import type { Airline } from "@/lib/api/schemas"
 
@@ -18,14 +19,16 @@ export function AirlineChip({ airline, count, onClear }: Props) {
         <IconPlane className="size-3.5" />
         {count} in view
       </span>
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        aria-label="Clear airline filter"
-        onClick={onClear}
-      >
-        <IconX />
-      </Button>
+      <Hint label="Show all airlines again">
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label="Clear airline filter"
+          onClick={onClear}
+        >
+          <IconX />
+        </Button>
+      </Hint>
     </div>
   )
 }

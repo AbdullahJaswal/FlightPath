@@ -1,4 +1,5 @@
 import { IconStack2 } from "@tabler/icons-react"
+import { Hint } from "@/components/hint"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -18,11 +19,13 @@ export function MapStyleMenu() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={<Button variant="ghost" size="icon" aria-label="Map style" />}
-      >
-        <ActiveIcon />
-      </DropdownMenuTrigger>
+      <Hint label="Map style" side="left">
+        <DropdownMenuTrigger
+          render={<Button variant="ghost" size="icon" aria-label="Map style" />}
+        >
+          <ActiveIcon />
+        </DropdownMenuTrigger>
+      </Hint>
       <DropdownMenuContent align="end" side="left" className="w-40">
         <DropdownMenuGroup>
           <DropdownMenuLabel>Map style</DropdownMenuLabel>

@@ -366,7 +366,7 @@ func (p *Poller) downsample(aircraft []model.Aircraft, now time.Time) []store.Po
 		}
 		p.last[a.ICAO24] = lastPos{stored: a.PositionAt, heading: heading, alt: alt, seen: now}
 		rows = append(rows, store.Position{
-			ICAO24: a.ICAO24, TS: a.PositionAt, Lat: a.Lat, Lon: a.Lon,
+			ICAO24: a.ICAO24, TS: a.PositionAt, Callsign: a.Callsign, Lat: a.Lat, Lon: a.Lon,
 			BaroAltM: a.BaroAltM, VelocityMS: a.VelocityMS, HeadingDeg: a.HeadingDeg, VertRateMS: a.VertRateMS,
 			OnGround: a.OnGround,
 		})

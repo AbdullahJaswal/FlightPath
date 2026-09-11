@@ -25,6 +25,7 @@ import {
 } from "@/lib/format"
 import { useSettled } from "@/lib/hooks"
 import { categoryInfo, sourceInfo } from "@/lib/labels"
+import { AircraftPhoto } from "./aircraft-photo"
 
 type Props = {
   aircraft: Aircraft
@@ -99,6 +100,8 @@ export function AircraftTooltip({ aircraft, x, y, width, height }: Props) {
           {category.label}
         </Badge>
       </div>
+
+      <AircraftPhoto icao24={aircraft.icao24} enabled={ready} size="thumb" />
 
       {flight.data?.airline && (
         <div className="flex items-center gap-1.5 text-muted-foreground">

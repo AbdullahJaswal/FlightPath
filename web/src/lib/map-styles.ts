@@ -2,6 +2,7 @@ import {
   IconMap2,
   IconMountain,
   IconPhoto,
+  IconPlanet,
   IconRoad,
   IconSatellite,
   IconTopologyStar3,
@@ -20,6 +21,7 @@ export type MapStyleId =
   | "canvas"
   | "streets"
   | "satellite"
+  | "earth"
 
 export type TileSource = {
   url: string
@@ -126,6 +128,18 @@ export const mapStyles: MapStyle[] = [
       url: esri("World_Imagery"),
       maxZoom: 19,
       attribution: "© Esri, Maxar, Earthstar Geographics",
+      tone: "dark",
+      overlay: true,
+    },
+  },
+  {
+    id: "earth",
+    label: "Daily Earth",
+    icon: IconPlanet,
+    tiles: {
+      url: "https://gibs.earthdata.nasa.gov/wmts/epsg3857/best/VIIRS_SNPP_CorrectedReflectance_TrueColor/default/{date}/GoogleMapsCompatible_Level9/{z}/{y}/{x}.jpg",
+      maxZoom: 9,
+      attribution: "NASA GIBS, VIIRS imagery from yesterday",
       tone: "dark",
       overlay: true,
     },

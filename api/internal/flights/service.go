@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/AbdullahJaswal/flightpath/api/internal/errs"
 	"github.com/AbdullahJaswal/flightpath/api/internal/model"
 	"github.com/AbdullahJaswal/flightpath/api/internal/opensky"
+	"github.com/AbdullahJaswal/flightpath/api/internal/planespotters"
 	"github.com/AbdullahJaswal/flightpath/api/internal/snapshot"
 	"github.com/AbdullahJaswal/flightpath/api/internal/store"
 )
@@ -27,27 +30,31 @@ type Config struct {
 }
 
 type Service struct {
-	cfg   Config
-	snaps *snapshot.Store
-	store *store.Store
-	cache *cache.Cache
-	adsb  *adsbdb.Client
-	avs   *aviationstack.Client
-	osky  *opensky.Client
-	log   *slog.Logger
-	now   func() time.Time
+	cfg    Config
+	snaps  *snapshot.Store
+	store  *store.Store
+	cache  *cache.Cache
+	adsb   *adsbdb.Client
+	avs    *aviationstack.Client
+	osky   *opensky.Client
+	photos *planespotters.Client
+	log    *slog.Logger
+	now    func() time.Time
 }
 
-// New wires the service. avs may be nil to disable schedule lookups.
-func New(cfg Config, snaps *snapshot.Store, st *store.Store, c *cache.Cache, adsb *adsbdb.Client, avs *aviationstack.Client, osky *opensky.Client, log *slog.Logger) *Service {
-	return &Service{cfg: cfg, snaps: snaps, store: st, cache: c, adsb: adsb, avs: avs, osky: osky, log: log, now: time.Now}
+// New wires the service. avs and photos may be nil to disable schedule and photo lookups.
+func New(cfg Config, snaps *snapshot.Store, st *store.Store, c *cache.Cache, adsb *adsbdb.Client, avs *aviationstack.Client, osky *opensky.Client, photos *planespotters.Client, log *slog.Logger) *Service {
+	return &Service{cfg: cfg, snaps: snaps, store: st, cache: c, adsb: adsb, avs: avs, osky: osky, photos: photos, log: log, now: time.Now}
 }
 
 // Cache key prefixes, shared with the poller and the seed command for invalidation.
 const (
 	PrefixAircraft = "aircraft:"
 	PrefixAirport  = "airport:"
+	PrefixAirports = "airports:"
 	PrefixAirline  = "airline:"
+	PrefixHistory  = "history:"
+	PrefixPhoto    = "photo:"
 	PrefixRoute    = "route:"
 	PrefixSchedule = "schedule:"
 	PrefixSearch   = "search:"
@@ -55,11 +62,17 @@ const (
 	PrefixTrack    = "track:"
 )
 
+// smallAirportSpan is the box size in degrees under which small airports are listed too.
+const smallAirportSpan = 4.0
+
 var (
 	ttlSearch       = cache.TTL{L1: time.Minute}
 	ttlAircraftInfo = cache.TTL{L1: time.Hour, L2: 24 * time.Hour, Negative: 5 * time.Minute}
 	ttlAirport      = cache.TTL{L1: time.Hour, L2: 24 * time.Hour, Negative: 5 * time.Minute}
+	ttlAirports     = cache.TTL{L1: 5 * time.Minute, L2: time.Hour}
 	ttlAirline      = cache.TTL{L1: time.Hour, L2: 24 * time.Hour, Negative: 5 * time.Minute}
+	ttlHistory      = cache.TTL{L1: time.Minute, L2: 2 * time.Minute}
+	ttlPhoto        = cache.TTL{L1: time.Hour, L2: 12 * time.Hour, Negative: 6 * time.Hour}
 	ttlRoute        = cache.TTL{L1: 10 * time.Minute, L2: 24 * time.Hour, Negative: 6 * time.Hour}
 	ttlSchedule     = cache.TTL{L1: 10 * time.Minute, L2: 6 * time.Hour, Negative: 6 * time.Hour}
 	ttlTrail        = cache.TTL{L1: 20 * time.Second, L2: 2 * time.Minute}
@@ -164,6 +177,31 @@ func (s *Service) Schedule(ctx context.Context, callsign string) (*model.Schedul
 	})
 }
 
+// Photo finds a Planespotters.net photo by address, then by registration.
+func (s *Service) Photo(ctx context.Context, icao24 string) (*model.Photo, error) {
+	if s.photos == nil {
+		return nil, errs.ErrDisabled
+	}
+	icao24 = strings.ToLower(strings.TrimSpace(icao24))
+	return cache.GetOrLoad(ctx, s.cache, PrefixPhoto+icao24, ttlPhoto, func(ctx context.Context) (*model.Photo, error) {
+		p, err := s.photos.ByHex(ctx, icao24)
+		if errors.Is(err, errs.ErrNotFound) {
+			info, ierr := s.aircraftInfo(ctx, icao24)
+			if ierr != nil && !errors.Is(ierr, errs.ErrNotFound) {
+				return nil, ierr
+			}
+			if info == nil || info.Registration == "" {
+				return nil, errs.ErrNotFound
+			}
+			p, err = s.photos.ByRegistration(ctx, info.Registration)
+		}
+		if err != nil {
+			return nil, err
+		}
+		return toPhoto(p), nil
+	})
+}
+
 func (s *Service) Airport(ctx context.Context, code string) (*model.Airport, error) {
 	return cache.GetOrLoad(ctx, s.cache, PrefixAirport+strings.ToUpper(strings.TrimSpace(code)), ttlAirport, func(ctx context.Context) (*model.Airport, error) {
 		a, err := s.store.AirportByCode(ctx, code)
@@ -171,6 +209,54 @@ func (s *Service) Airport(ctx context.Context, code string) (*model.Airport, err
 			return nil, err
 		}
 		return toAirport(a), nil
+	})
+}
+
+// Airports lists the airports inside the box, biggest first. The box is snapped to a hundredth of a degree so nearby requests share a cache entry.
+func (s *Service) Airports(ctx context.Context, b snapshot.Bounds, limit int) (*model.AirportList, error) {
+	b = roundBounds(b, 0.01)
+	types := airportTypes(b)
+	key := fmt.Sprintf("%s%.2f,%.2f,%.2f,%.2f:%d", PrefixAirports, b.West, b.South, b.East, b.North, limit)
+	return cache.GetOrLoad(ctx, s.cache, key, ttlAirports, func(ctx context.Context) (*model.AirportList, error) {
+		rows, err := s.store.AirportsInBounds(ctx, b.West, b.South, b.East, b.North, types, limit)
+		if err != nil {
+			return nil, err
+		}
+		out := &model.AirportList{Airports: make([]model.Airport, 0, len(rows))}
+		for i := range rows {
+			out.Airports = append(out.Airports, *toAirport(&rows[i]))
+		}
+		out.Count = len(out.Airports)
+		return out, nil
+	})
+}
+
+// Airline returns airline reference data by ICAO code.
+func (s *Service) Airline(ctx context.Context, icao string) (*model.Airline, error) {
+	return s.airline(ctx, strings.ToUpper(strings.TrimSpace(icao)))
+}
+
+// History groups the stored positions inside the box during the window into tracks, longest first.
+// The box is snapped to a tenth of a degree so nearby requests share a cache entry.
+func (s *Service) History(ctx context.Context, b snapshot.Bounds, minutes, limit int) (*model.History, error) {
+	b = roundBounds(b, 0.1)
+	key := fmt.Sprintf("%s%.1f,%.1f,%.1f,%.1f:%d:%d", PrefixHistory, b.West, b.South, b.East, b.North, minutes, limit)
+	return cache.GetOrLoad(ctx, s.cache, key, ttlHistory, func(ctx context.Context) (*model.History, error) {
+		to := s.now()
+		window := time.Duration(minutes) * time.Minute
+		if s.cfg.TrailRetention > 0 && window > s.cfg.TrailRetention {
+			window = s.cfg.TrailRetention
+		}
+		from := to.Add(-window)
+		rows, err := s.store.PositionsInBounds(ctx, from, b.West, b.South, b.East, b.North)
+		if err != nil {
+			return nil, err
+		}
+		tracks := groupTracks(rows)
+		if len(tracks) > limit {
+			tracks = tracks[:limit]
+		}
+		return &model.History{From: from, To: to, Count: len(tracks), Tracks: tracks}, nil
 	})
 }
 
@@ -349,6 +435,57 @@ func (s *Service) trail(ctx context.Context, icao24 string) ([]model.TrailPoint,
 	return points, model.TrailStored, nil
 }
 
+// groupTracks turns rows ordered by aircraft and time into tracks of at least two points, most points first.
+func groupTracks(rows []store.Position) []model.Track {
+	tracks := []model.Track{}
+	for i := range rows {
+		r := &rows[i]
+		if n := len(tracks); n == 0 || tracks[n-1].ICAO24 != r.ICAO24 {
+			tracks = append(tracks, model.Track{ICAO24: r.ICAO24, Points: []model.TrailPoint{}})
+		}
+		t := &tracks[len(tracks)-1]
+		if r.Callsign != "" {
+			t.Callsign = r.Callsign
+		}
+		t.Points = append(t.Points, model.TrailPoint{Time: r.TS, Lat: r.Lat, Lon: r.Lon, BaroAltM: r.BaroAltM, HeadingDeg: r.HeadingDeg, OnGround: r.OnGround})
+	}
+	tracks = slices.DeleteFunc(tracks, func(t model.Track) bool { return len(t.Points) < 2 })
+	slices.SortFunc(tracks, func(a, b model.Track) int {
+		if n := len(b.Points) - len(a.Points); n != 0 {
+			return n
+		}
+		return strings.Compare(a.ICAO24, b.ICAO24)
+	})
+	return tracks
+}
+
+// airportTypes adds small airports only when the box is under smallAirportSpan degrees on each side.
+func airportTypes(b snapshot.Bounds) []string {
+	types := []string{"large_airport", "medium_airport"}
+	if lonSpan(b) < smallAirportSpan && b.North-b.South < smallAirportSpan {
+		types = append(types, "small_airport")
+	}
+	return types
+}
+
+// lonSpan is the width of the box in degrees, wrapping across the antimeridian.
+func lonSpan(b snapshot.Bounds) float64 {
+	if b.West <= b.East {
+		return b.East - b.West
+	}
+	return 360 - b.West + b.East
+}
+
+// roundBounds snaps the box edges to a grid of the given step.
+func roundBounds(b snapshot.Bounds, step float64) snapshot.Bounds {
+	return snapshot.Bounds{
+		West:  math.Round(b.West/step) * step,
+		South: math.Round(b.South/step) * step,
+		East:  math.Round(b.East/step) * step,
+		North: math.Round(b.North/step) * step,
+	}
+}
+
 func normalize(callsign string) string {
 	return strings.ToUpper(strings.TrimSpace(callsign))
 }
@@ -362,6 +499,17 @@ func toAirport(a *store.Airport) *model.Airport {
 
 func toAirline(a *store.Airline) *model.Airline {
 	return &model.Airline{ICAO: a.ICAO, IATA: a.IATA, Name: a.Name, Callsign: a.Callsign, Country: a.Country}
+}
+
+func toPhoto(p *planespotters.Photo) *model.Photo {
+	return &model.Photo{
+		ID:           p.ID,
+		Thumbnail:    model.PhotoImage{Src: p.Thumbnail.Src, Width: p.Thumbnail.Width, Height: p.Thumbnail.Height},
+		Large:        model.PhotoImage{Src: p.Large.Src, Width: p.Large.Width, Height: p.Large.Height},
+		Link:         p.Link,
+		Photographer: p.Photographer,
+		Source:       model.PhotoPlanespotters,
+	}
 }
 
 func fromADSBAirport(a *adsbdb.Airport) *model.Airport {

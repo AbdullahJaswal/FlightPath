@@ -153,6 +153,16 @@ func (TrailSource) Schema(r huma.Registry) *huma.Schema {
 	return enumSchema(r, "TrailSource", "Origin of the trail points.", []string{"stored", "opensky", "none"})
 }
 
+// PhotoSource identifies the site that hosts a photo.
+type PhotoSource string
+
+const PhotoPlanespotters PhotoSource = "planespotters"
+
+// Schema implements huma.SchemaProvider.
+func (PhotoSource) Schema(r huma.Registry) *huma.Schema {
+	return enumSchema(r, "PhotoSource", "Site that hosts the photo.", []string{"planespotters"})
+}
+
 // PollerMode describes what the position poller is doing.
 type PollerMode string
 

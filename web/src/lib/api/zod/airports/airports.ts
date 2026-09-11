@@ -8,6 +8,86 @@
 import * as zod from "zod"
 
 /**
+ * Airports from OurAirports inside the box, large and medium ones first. Small airports are included only when the box spans less than four degrees.
+ * @summary List airports in a bounding box
+ */
+export const listAirportsQueryWestDefault = -180
+export const listAirportsQueryWestMin = -180
+export const listAirportsQueryWestMax = 180
+
+export const listAirportsQuerySouthDefault = -90
+export const listAirportsQuerySouthMin = -90
+export const listAirportsQuerySouthMax = 90
+
+export const listAirportsQueryEastDefault = 180
+export const listAirportsQueryEastMin = -180
+export const listAirportsQueryEastMax = 180
+
+export const listAirportsQueryNorthDefault = 90
+export const listAirportsQueryNorthMin = -90
+export const listAirportsQueryNorthMax = 90
+
+export const listAirportsQueryLimitDefault = 200
+export const listAirportsQueryLimitMax = 1000
+
+export const ListAirportsQueryParams = zod.object({
+  west: zod
+    .number()
+    .min(listAirportsQueryWestMin)
+    .max(listAirportsQueryWestMax)
+    .default(listAirportsQueryWestDefault)
+    .describe(
+      "Western edge in degrees. Greater than east when the box crosses the antimeridian."
+    ),
+  south: zod
+    .number()
+    .min(listAirportsQuerySouthMin)
+    .max(listAirportsQuerySouthMax)
+    .default(listAirportsQuerySouthDefault)
+    .describe("Southern edge in degrees."),
+  east: zod
+    .number()
+    .min(listAirportsQueryEastMin)
+    .max(listAirportsQueryEastMax)
+    .default(listAirportsQueryEastDefault)
+    .describe("Eastern edge in degrees."),
+  north: zod
+    .number()
+    .min(listAirportsQueryNorthMin)
+    .max(listAirportsQueryNorthMax)
+    .default(listAirportsQueryNorthDefault)
+    .describe("Northern edge in degrees."),
+  limit: zod
+    .int()
+    .min(1)
+    .max(listAirportsQueryLimitMax)
+    .default(listAirportsQueryLimitDefault)
+    .describe("Maximum airports to return."),
+})
+
+export const ListAirportsResponse = zod.object({
+  airports: zod
+    .array(
+      zod.object({
+        country: zod.string().optional().describe("ISO 3166-1 alpha-2 code."),
+        elevationFt: zod.int().optional(),
+        iata: zod.string().optional(),
+        icao: zod.string().describe("ICAO identifier."),
+        lat: zod.number(),
+        lon: zod.number(),
+        municipality: zod.string().optional(),
+        name: zod.string(),
+        type: zod
+          .string()
+          .optional()
+          .describe("OurAirports type such as large_airport."),
+      })
+    )
+    .nullable(),
+  count: zod.int(),
+})
+
+/**
  * @summary Get an airport by ICAO or IATA code
  */
 export const getAirportPathCodeRegExp = new RegExp("^[A-Za-z0-9]{3,4}$")

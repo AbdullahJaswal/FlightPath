@@ -9,6 +9,7 @@ import {
   IconCurrentLocation,
   IconDoor,
   IconFlag,
+  IconFocusCentered,
   IconGauge,
   IconHash,
   IconHourglass,
@@ -30,6 +31,7 @@ import {
   IconX,
 } from "@tabler/icons-react"
 import { useState } from "react"
+import { Hint } from "@/components/hint"
 import {
   AircraftPanelSkeleton,
   RouteSkeleton,
@@ -74,6 +76,7 @@ import {
   statusInfo,
 } from "@/lib/labels"
 import { ApiError } from "@/lib/server/bff-fetch"
+import { AircraftPhoto } from "./aircraft-photo"
 import { DetailRow, Section } from "./detail-row"
 
 type Props = {
@@ -85,6 +88,8 @@ type Props = {
   flightPending: boolean
   onClose: () => void
   onCenter: () => void
+  following: boolean
+  onFollow: () => void
 }
 
 export function AircraftPanel({
@@ -96,6 +101,8 @@ export function AircraftPanel({
   flightPending,
   onClose,
   onCenter,
+  following,
+  onFollow,
 }: Props) {
   const booting = useSettled(!live && detailPending)
   const routeLoading = useSettled(flightPending)
@@ -118,6 +125,7 @@ export function AircraftPanel({
       size="sm"
       className="flex max-h-[min(55svh,42rem)] w-[min(100vw-1.5rem,23rem)] animate-fade-up flex-col gap-0 py-0 text-sm/relaxed shadow-md sm:max-h-[min(70svh,42rem)]"
     >
+      <AircraftPhoto icao24={icao24} />
       <CardHeader className="shrink-0 border-b py-3">
         <div className="flex items-center gap-2">
           <IconPlane className="size-5 shrink-0 text-primary" />
@@ -144,22 +152,43 @@ export function AircraftPanel({
               )}
             </div>
           </div>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Center on aircraft"
-            onClick={onCenter}
+          <Hint
+            label="Keep the map on this aircraft"
+            keys={["f"]}
+            side="bottom"
           >
-            <IconCurrentLocation />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Close"
-            onClick={onClose}
-          >
-            <IconX />
-          </Button>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Follow aircraft"
+              aria-pressed={following}
+              className={following ? "bg-primary/15 text-primary" : ""}
+              disabled={!live}
+              onClick={onFollow}
+            >
+              <IconFocusCentered />
+            </Button>
+          </Hint>
+          <Hint label="Center on the aircraft" keys={["c"]} side="bottom">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Center on aircraft"
+              onClick={onCenter}
+            >
+              <IconCurrentLocation />
+            </Button>
+          </Hint>
+          <Hint label="Close" keys={["esc"]} side="bottom">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Close"
+              onClick={onClose}
+            >
+              <IconX />
+            </Button>
+          </Hint>
         </div>
       </CardHeader>
 

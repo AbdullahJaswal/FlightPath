@@ -1,4 +1,5 @@
 import {
+  IconCloudRain,
   IconCode,
   IconInfoCircle,
   IconSatellite,
@@ -6,11 +7,18 @@ import {
   IconShieldLock,
 } from "@tabler/icons-react"
 import { Link } from "@tanstack/react-router"
+import { radarAttribution, radarSite } from "@/lib/rainviewer"
 
 const linkClass =
   "flex shrink-0 items-center gap-1 transition-colors hover:text-foreground [&_svg]:size-3.5"
 
-export function SiteFooter({ attribution }: { attribution?: string }) {
+export function SiteFooter({
+  attribution,
+  weather,
+}: {
+  attribution?: string
+  weather?: boolean
+}) {
   return (
     <nav className="flex max-w-[calc(100vw-1.5rem)] items-center gap-3 overflow-hidden whitespace-nowrap rounded-lg bg-card/90 px-3 py-1.5 text-muted-foreground text-xs ring-1 ring-foreground/10 backdrop-blur">
       <a
@@ -43,6 +51,17 @@ export function SiteFooter({ attribution }: { attribution?: string }) {
         <IconSatellite />
         OpenSky Network
       </a>
+      {weather && (
+        <a
+          href={radarSite}
+          target="_blank"
+          rel="noreferrer"
+          className={linkClass}
+        >
+          <IconCloudRain />
+          {radarAttribution}
+        </a>
+      )}
       {attribution && <span className="min-w-0 truncate">{attribution}</span>}
     </nav>
   )

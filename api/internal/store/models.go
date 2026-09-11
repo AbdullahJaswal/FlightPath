@@ -65,6 +65,7 @@ type Position struct {
 
 	ICAO24     string    `bun:"icao24,pk"`
 	TS         time.Time `bun:"ts,pk"`
+	Callsign   string    `bun:"callsign,nullzero"`
 	Lat        float64   `bun:"lat,notnull"`
 	Lon        float64   `bun:"lon,notnull"`
 	BaroAltM   *float64  `bun:"baro_alt_m"`

@@ -29,6 +29,7 @@ import (
 	"github.com/AbdullahJaswal/flightpath/api/internal/live"
 	"github.com/AbdullahJaswal/flightpath/api/internal/model"
 	"github.com/AbdullahJaswal/flightpath/api/internal/opensky"
+	"github.com/AbdullahJaswal/flightpath/api/internal/planespotters"
 	"github.com/AbdullahJaswal/flightpath/api/internal/poller"
 	"github.com/AbdullahJaswal/flightpath/api/internal/server"
 	"github.com/AbdullahJaswal/flightpath/api/internal/snapshot"
@@ -94,11 +95,15 @@ func run() error {
 	if cfg.Aviationstack.APIKey != "" {
 		avs = aviationstack.New(cfg.Aviationstack.BaseURL, cfg.Aviationstack.APIKey, nil)
 	}
+	var photos *planespotters.Client
+	if cfg.Planespotters.Enabled {
+		photos = planespotters.New(cfg.Planespotters.BaseURL, cfg.Planespotters.UserAgent, nil)
+	}
 	svc := flights.New(flights.Config{
 		AviationstackCap: cfg.Aviationstack.MonthlyCap,
 		TrailRetention:   cfg.TrailRetention,
 		TracksEnabled:    cfg.OpenSky.TracksEnabled,
-	}, snaps, st, c, adsb, avs, osky, log)
+	}, snaps, st, c, adsb, avs, osky, photos, log)
 
 	var pl *poller.Poller
 	if cfg.PollerEnabled {
@@ -141,7 +146,7 @@ func run() error {
 	}
 	srv := server.New(cfg, version, deps, hub, ready, log)
 
-	log.Info("starting", "version", version, "instance", instance, "poller", cfg.PollerEnabled, "opensky_anonymous", osky.Anonymous(), "aviationstack", avs != nil)
+	log.Info("starting", "version", version, "instance", instance, "poller", cfg.PollerEnabled, "opensky_anonymous", osky.Anonymous(), "aviationstack", avs != nil, "planespotters", photos != nil)
 	syncer := poller.NewSyncer(instance, rdb, c, snaps, log)
 	syncer.Load(ctx)
 	g, gctx := errgroup.WithContext(ctx)

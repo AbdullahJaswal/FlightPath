@@ -1,16 +1,14 @@
 import { IconMapPinOff } from "@tabler/icons-react"
-import { TanStackDevtools } from "@tanstack/react-devtools"
 import type { QueryClient } from "@tanstack/react-query"
-import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools"
 import {
   createRootRouteWithContext,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router"
-import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools"
-import type { ReactNode } from "react"
+import { lazy, type ReactNode, Suspense } from "react"
 import { PageShell } from "@/components/page-shell"
 import { ThemeProvider } from "@/components/theme-provider"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import appCss from "@/styles.css?url"
 
 export const Route = createRootRouteWithContext<{
@@ -36,6 +34,11 @@ export const Route = createRootRouteWithContext<{
   shellComponent: RootDocument,
 })
 
+// dev only, kept out of the production bundle
+const Devtools = import.meta.env.DEV
+  ? lazy(() => import("@/components/devtools"))
+  : null
+
 function RootDocument({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
@@ -43,14 +46,14 @@ function RootDocument({ children }: { children: ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <ThemeProvider>{children}</ThemeProvider>
-        <TanStackDevtools
-          config={{ position: "bottom-right" }}
-          plugins={[
-            { name: "Router", render: <TanStackRouterDevtoolsPanel /> },
-            { name: "Query", render: <ReactQueryDevtoolsPanel /> },
-          ]}
-        />
+        <ThemeProvider>
+          <TooltipProvider>{children}</TooltipProvider>
+        </ThemeProvider>
+        {Devtools && (
+          <Suspense fallback={null}>
+            <Devtools />
+          </Suspense>
+        )}
         <Scripts />
       </body>
     </html>

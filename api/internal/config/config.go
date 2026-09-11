@@ -27,6 +27,7 @@ type Config struct {
 	OpenSky       OpenSky       `envPrefix:"OPENSKY_"`
 	Aviationstack Aviationstack `envPrefix:"AVIATIONSTACK_"`
 	ADSBDB        ADSBDB        `envPrefix:"ADSBDB_"`
+	Planespotters Planespotters `envPrefix:"PLANESPOTTERS_"`
 }
 
 type OpenSky struct {
@@ -47,6 +48,12 @@ type Aviationstack struct {
 
 type ADSBDB struct {
 	BaseURL string `env:"BASE_URL" envDefault:"https://api.adsbdb.com/v0"`
+}
+
+type Planespotters struct {
+	BaseURL   string `env:"BASE_URL" envDefault:"https://api.planespotters.net/pub"`
+	UserAgent string `env:"USER_AGENT" envDefault:"Flightpath/1.0 (+https://abdullahjaswal.dev/)"`
+	Enabled   bool   `env:"ENABLED" envDefault:"true"`
 }
 
 func Load() (Config, error) {

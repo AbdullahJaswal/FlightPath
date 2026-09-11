@@ -300,3 +300,136 @@ export const GetAircraftResponse = zod.object({
     .enum(["stored", "opensky", "none"])
     .describe("Origin of the trail points."),
 })
+
+/**
+ * Thumbnail from Planespotters.net, found by address and then by registration. Images are hotlinked and must be shown with the photographer credit and a link to the photo page.
+ * @summary Get a photo of an aircraft
+ */
+export const getAircraftPhotoPathIcao24RegExp = new RegExp("^[0-9a-fA-F]{6}$")
+
+export const GetAircraftPhotoParams = zod.object({
+  icao24: zod
+    .string()
+    .regex(getAircraftPhotoPathIcao24RegExp)
+    .describe("Mode S address as six hex digits."),
+})
+
+export const GetAircraftPhotoResponse = zod.object({
+  id: zod.string(),
+  large: zod
+    .object({
+      height: zod.int(),
+      src: zod.string(),
+      width: zod.int(),
+    })
+    .describe("About 280 px tall."),
+  link: zod
+    .string()
+    .describe(
+      "Photo page on Planespotters.net. The image must link here and credit the photographer."
+    ),
+  photographer: zod.string(),
+  source: zod.enum(["planespotters"]).describe("Site that hosts the photo."),
+  thumbnail: zod
+    .object({
+      height: zod.int(),
+      src: zod.string(),
+      width: zod.int(),
+    })
+    .describe("About 200 px wide."),
+})
+
+/**
+ * Downsampled stored positions of aircraft that flew through the box during the window, for replaying the last hours. Tracks with the most points come first.
+ * @summary Get recent tracks in a bounding box
+ */
+export const getHistoryQueryWestDefault = -180
+export const getHistoryQueryWestMin = -180
+export const getHistoryQueryWestMax = 180
+
+export const getHistoryQuerySouthDefault = -90
+export const getHistoryQuerySouthMin = -90
+export const getHistoryQuerySouthMax = 90
+
+export const getHistoryQueryEastDefault = 180
+export const getHistoryQueryEastMin = -180
+export const getHistoryQueryEastMax = 180
+
+export const getHistoryQueryNorthDefault = 90
+export const getHistoryQueryNorthMin = -90
+export const getHistoryQueryNorthMax = 90
+
+export const getHistoryQueryMinutesDefault = 60
+export const getHistoryQueryMinutesMin = 5
+export const getHistoryQueryMinutesMax = 180
+
+export const getHistoryQueryLimitDefault = 300
+export const getHistoryQueryLimitMax = 1000
+
+export const GetHistoryQueryParams = zod.object({
+  west: zod
+    .number()
+    .min(getHistoryQueryWestMin)
+    .max(getHistoryQueryWestMax)
+    .default(getHistoryQueryWestDefault)
+    .describe(
+      "Western edge in degrees. Greater than east when the box crosses the antimeridian."
+    ),
+  south: zod
+    .number()
+    .min(getHistoryQuerySouthMin)
+    .max(getHistoryQuerySouthMax)
+    .default(getHistoryQuerySouthDefault)
+    .describe("Southern edge in degrees."),
+  east: zod
+    .number()
+    .min(getHistoryQueryEastMin)
+    .max(getHistoryQueryEastMax)
+    .default(getHistoryQueryEastDefault)
+    .describe("Eastern edge in degrees."),
+  north: zod
+    .number()
+    .min(getHistoryQueryNorthMin)
+    .max(getHistoryQueryNorthMax)
+    .default(getHistoryQueryNorthDefault)
+    .describe("Northern edge in degrees."),
+  minutes: zod
+    .int()
+    .min(getHistoryQueryMinutesMin)
+    .max(getHistoryQueryMinutesMax)
+    .default(getHistoryQueryMinutesDefault)
+    .describe("Length of the window ending now."),
+  limit: zod
+    .int()
+    .min(1)
+    .max(getHistoryQueryLimitMax)
+    .default(getHistoryQueryLimitDefault)
+    .describe("Maximum tracks to return."),
+})
+
+export const GetHistoryResponse = zod.object({
+  count: zod.int().describe("Tracks returned."),
+  from: zod.iso.datetime({ offset: true }),
+  to: zod.iso.datetime({ offset: true }),
+  tracks: zod
+    .array(
+      zod.object({
+        callsign: zod.string().optional(),
+        icao24: zod.string(),
+        points: zod
+          .array(
+            zod.object({
+              baroAltM: zod.number().optional(),
+              headingDeg: zod.number().optional(),
+              lat: zod.number(),
+              lon: zod.number(),
+              onGround: zod.boolean(),
+              time: zod.iso.datetime({ offset: true }),
+            })
+          )
+          .nullable()
+          .describe("Chronological positions."),
+      })
+    )
+    .nullable(),
+})

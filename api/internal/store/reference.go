@@ -98,6 +98,28 @@ func (s *Store) SearchAirports(ctx context.Context, q string, limit int) ([]Airp
 	return rows, err
 }
 
+// AirportsInBounds returns airports of the given types inside the box, biggest first.
+func (s *Store) AirportsInBounds(ctx context.Context, west, south, east, north float64, types []string, limit int) ([]Airport, error) {
+	var rows []Airport
+	err := inBounds(s.db.NewSelect().Model(&rows), west, south, east, north).
+		Where("type IN (?)", bun.List(types)).
+		OrderExpr("CASE type WHEN 'large_airport' THEN 0 WHEN 'medium_airport' THEN 1 ELSE 2 END").
+		Order("name ASC").
+		Limit(limit).Scan(ctx)
+	return rows, err
+}
+
+// inBounds filters on the lat and lon columns. West exceeds east when the box crosses the antimeridian.
+func inBounds(q *bun.SelectQuery, west, south, east, north float64) *bun.SelectQuery {
+	q = q.Where("lat BETWEEN ? AND ?", south, north)
+	if west <= east {
+		return q.Where("lon BETWEEN ? AND ?", west, east)
+	}
+	return q.WhereGroup(" AND ", func(sq *bun.SelectQuery) *bun.SelectQuery {
+		return sq.WhereOr("lon >= ?", west).WhereOr("lon <= ?", east)
+	})
+}
+
 func (s *Store) AirlineByICAO(ctx context.Context, icao string) (*Airline, error) {
 	var a Airline
 	err := s.db.NewSelect().Model(&a).Where("icao = ?", strings.ToUpper(icao)).Limit(1).Scan(ctx)

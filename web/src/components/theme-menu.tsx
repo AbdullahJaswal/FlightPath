@@ -4,6 +4,7 @@ import {
   IconPalette,
   IconSun,
 } from "@tabler/icons-react"
+import { Hint } from "@/components/hint"
 import { useTheme } from "@/components/theme-provider"
 import { Button } from "@/components/ui/button"
 import {
@@ -30,18 +31,20 @@ export function ThemeMenu() {
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        render={
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label="Appearance"
-            className="bg-card shadow-sm hover:bg-accent dark:bg-card dark:hover:bg-accent"
-          />
-        }
-      >
-        <ModeIcon />
-      </DropdownMenuTrigger>
+      <Hint label="Theme and accent colour" side="bottom">
+        <DropdownMenuTrigger
+          render={
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label="Appearance"
+              className="bg-card shadow-sm hover:bg-accent dark:bg-card dark:hover:bg-accent"
+            />
+          }
+        >
+          <ModeIcon />
+        </DropdownMenuTrigger>
+      </Hint>
       <DropdownMenuContent align="end" className="w-44">
         <DropdownMenuGroup>
           <DropdownMenuLabel>Appearance</DropdownMenuLabel>

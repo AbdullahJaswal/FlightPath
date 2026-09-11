@@ -5,7 +5,7 @@ import viteReact from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 import { apiUrl } from "./src/lib/server/api-url.ts"
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   server: {
     port: 3000,
     proxy: {
@@ -19,6 +19,11 @@ export default defineConfig({
   },
   resolve: { tsconfigPaths: true },
   // bundle the server so the runtime image needs no node_modules
-  ssr: { noExternal: true },
-  plugins: [devtools(), tailwindcss(), tanstackStart(), viteReact()],
-})
+  ssr: { noExternal: command === "build" ? true : undefined },
+  plugins: [
+    command === "serve" && devtools(),
+    tailwindcss(),
+    tanstackStart(),
+    viteReact(),
+  ],
+}))

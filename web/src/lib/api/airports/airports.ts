@@ -23,7 +23,12 @@ import type {
   UseQueryResult,
 } from "@tanstack/react-query"
 
-import type { Airport, ErrorModel } from "../schemas"
+import type {
+  Airport,
+  AirportList,
+  ErrorModel,
+  ListAirportsParams,
+} from "../schemas"
 
 import { bffFetch } from "../../server/bff-fetch.ts"
 
@@ -45,6 +50,395 @@ const withQueryKey = <T extends object, K>(
     })
   }
   return result
+}
+
+export const getListAirportsUrl = (params?: ListAirportsParams) => {
+  const normalizedParams = new URLSearchParams()
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value))
+    }
+  })
+
+  const stringifiedParams = normalizedParams.toString()
+
+  return stringifiedParams.length > 0
+    ? `/airports?${stringifiedParams}`
+    : `/airports`
+}
+
+/**
+ * Airports from OurAirports inside the box, large and medium ones first. Small airports are included only when the box spans less than four degrees.
+ * @summary List airports in a bounding box
+ */
+export const listAirports = async (
+  params?: ListAirportsParams,
+  options?: Parameters<typeof bffFetch>[1]
+): Promise<AirportList> => {
+  return bffFetch<AirportList>(getListAirportsUrl(params), {
+    ...options,
+    method: "GET",
+  })
+}
+
+export const getListAirportsInfiniteQueryKey = (
+  params?: ListAirportsParams
+) => {
+  return ["infinite", `/airports`, ...(params ? [params] : [])] as const
+}
+
+export const getListAirportsQueryKey = (params?: ListAirportsParams) => {
+  return [`/airports`, ...(params ? [params] : [])] as const
+}
+
+export const getListAirportsInfiniteQueryOptions = <
+  TData = InfiniteData<Awaited<ReturnType<typeof listAirports>>>,
+  TError = ErrorModel,
+>(
+  params?: ListAirportsParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listAirports>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListAirportsInfiniteQueryKey(params)
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listAirports>>> = ({
+    signal,
+  }) => listAirports(params, { signal, ...requestOptions })
+
+  return { queryKey, queryFn, ...queryOptions } as UseInfiniteQueryOptions<
+    Awaited<ReturnType<typeof listAirports>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListAirportsInfiniteQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAirports>>
+>
+export type ListAirportsInfiniteQueryError = ErrorModel
+
+export function useListAirportsInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof listAirports>>>,
+  TError = ErrorModel,
+>(
+  params: undefined | ListAirportsParams,
+  options: {
+    query: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listAirports>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAirports>>,
+          TError,
+          Awaited<ReturnType<typeof listAirports>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useListAirportsInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof listAirports>>>,
+  TError = ErrorModel,
+>(
+  params?: ListAirportsParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listAirports>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAirports>>,
+          TError,
+          Awaited<ReturnType<typeof listAirports>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useListAirportsInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof listAirports>>>,
+  TError = ErrorModel,
+>(
+  params?: ListAirportsParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listAirports>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary List airports in a bounding box
+ */
+
+export function useListAirportsInfinite<
+  TData = InfiniteData<Awaited<ReturnType<typeof listAirports>>>,
+  TError = ErrorModel,
+>(
+  params?: ListAirportsParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listAirports>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseInfiniteQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getListAirportsInfiniteQueryOptions(params, options)
+
+  const query = useInfiniteQuery(
+    queryOptions,
+    queryClient
+  ) as UseInfiniteQueryResult<TData, TError> & {
+    queryKey: DataTag<QueryKey, TData, TError>
+  }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary List airports in a bounding box
+ */
+export const prefetchListAirportsInfiniteQuery = async <
+  TData = Awaited<ReturnType<typeof listAirports>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  params?: ListAirportsParams,
+  options?: {
+    query?: Partial<
+      UseInfiniteQueryOptions<
+        Awaited<ReturnType<typeof listAirports>>,
+        TError,
+        TData
+      >
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getListAirportsInfiniteQueryOptions(params, options)
+
+  await queryClient.prefetchInfiniteQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useListAirportsInfinite} query
+ */
+export const invalidateListAirportsInfinite = async (
+  queryClient: QueryClient,
+  params?: ListAirportsParams,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getListAirportsInfiniteQueryKey(params) },
+    options
+  )
+
+  return queryClient
+}
+
+export const getListAirportsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAirports>>,
+  TError = ErrorModel,
+>(
+  params?: ListAirportsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAirports>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {}
+
+  const queryKey = queryOptions?.queryKey ?? getListAirportsQueryKey(params)
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listAirports>>> = ({
+    signal,
+  }) => listAirports(params, { signal, ...requestOptions })
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAirports>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ListAirportsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAirports>>
+>
+export type ListAirportsQueryError = ErrorModel
+
+export function useListAirports<
+  TData = Awaited<ReturnType<typeof listAirports>>,
+  TError = ErrorModel,
+>(
+  params: undefined | ListAirportsParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAirports>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAirports>>,
+          TError,
+          Awaited<ReturnType<typeof listAirports>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useListAirports<
+  TData = Awaited<ReturnType<typeof listAirports>>,
+  TError = ErrorModel,
+>(
+  params?: ListAirportsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAirports>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAirports>>,
+          TError,
+          Awaited<ReturnType<typeof listAirports>>
+        >,
+        "initialData"
+      >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+export function useListAirports<
+  TData = Awaited<ReturnType<typeof listAirports>>,
+  TError = ErrorModel,
+>(
+  params?: ListAirportsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAirports>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+}
+/**
+ * @summary List airports in a bounding box
+ */
+
+export function useListAirports<
+  TData = Awaited<ReturnType<typeof listAirports>>,
+  TError = ErrorModel,
+>(
+  params?: ListAirportsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAirports>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  },
+  queryClient?: QueryClient
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>
+} {
+  const queryOptions = getListAirportsQueryOptions(params, options)
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> }
+
+  return withQueryKey(query, queryOptions.queryKey)
+}
+
+/**
+ * @summary List airports in a bounding box
+ */
+export const prefetchListAirportsQuery = async <
+  TData = Awaited<ReturnType<typeof listAirports>>,
+  TError = ErrorModel,
+>(
+  queryClient: QueryClient,
+  params?: ListAirportsParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listAirports>>, TError, TData>
+    >
+    request?: SecondParameter<typeof bffFetch>
+  }
+): Promise<QueryClient> => {
+  const queryOptions = getListAirportsQueryOptions(params, options)
+
+  await queryClient.prefetchQuery(queryOptions)
+
+  return queryClient
+}
+
+/**
+ * @summary Invalidates the {@link useListAirports} query
+ */
+export const invalidateListAirports = async (
+  queryClient: QueryClient,
+  params?: ListAirportsParams,
+  options?: InvalidateOptions
+): Promise<QueryClient> => {
+  await queryClient.invalidateQueries(
+    { queryKey: getListAirportsQueryKey(params) },
+    options
+  )
+
+  return queryClient
 }
 
 export const getGetAirportUrl = (code: string) => {

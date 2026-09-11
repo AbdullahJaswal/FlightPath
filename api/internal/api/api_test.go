@@ -51,6 +51,11 @@ func TestListAircraft(t *testing.T) {
 	require.Equal(t, http.StatusUnprocessableEntity, h.Get("/aircraft?south=50&north=40").Code)
 	require.Equal(t, http.StatusUnprocessableEntity, h.Get("/aircraft?limit=99999").Code)
 	require.Equal(t, http.StatusUnprocessableEntity, h.Get("/aircraft/zzz").Code)
+	require.Equal(t, http.StatusUnprocessableEntity, h.Get("/aircraft/zzz/photo").Code)
+	require.Equal(t, http.StatusUnprocessableEntity, h.Get("/airports?south=50&north=40").Code)
+	require.Equal(t, http.StatusUnprocessableEntity, h.Get("/airlines/DL").Code)
+	require.Equal(t, http.StatusUnprocessableEntity, h.Get("/history?minutes=1").Code)
+	require.Equal(t, http.StatusUnprocessableEntity, h.Get("/history?west=200").Code)
 	require.Equal(t, http.StatusUnprocessableEntity, h.Get("/search?q=a").Code)
 }
 
@@ -66,7 +71,7 @@ func TestOpenAPIDocument(t *testing.T) {
 	}
 	require.NoError(t, json.Unmarshal(b, &spec))
 
-	for _, name := range []string{"PositionSource", "Category", "FlightStatus", "MetaSource", "PollerMode", "TrailSource", "Aircraft", "AircraftList", "FlightDetail", "Schedule", "Stats", "ErrorModel"} {
+	for _, name := range []string{"PositionSource", "Category", "FlightStatus", "MetaSource", "PollerMode", "TrailSource", "PhotoSource", "Aircraft", "AircraftList", "AirportList", "FlightDetail", "Schedule", "Photo", "Track", "History", "Stats", "ErrorModel"} {
 		require.Contains(t, spec.Components.Schemas, name)
 	}
 	require.ElementsMatch(t, []any{"adsb", "asterix", "mlat", "flarm", "unknown"}, spec.Components.Schemas["PositionSource"]["enum"])
@@ -75,7 +80,7 @@ func TestOpenAPIDocument(t *testing.T) {
 	require.Equal(t, "#/components/schemas/PositionSource", props["source"].(map[string]any)["$ref"])
 	require.NotContains(t, props, "$schema")
 
-	require.Len(t, spec.Paths, 7)
+	require.Len(t, spec.Paths, 11)
 	for path, item := range spec.Paths {
 		for method, op := range item {
 			require.NotEmpty(t, op["operationId"], path+" "+method)

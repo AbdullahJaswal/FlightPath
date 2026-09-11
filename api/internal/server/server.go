@@ -105,6 +105,7 @@ func openAPIConfig(version string) huma.Config {
 		{Name: "aircraft", Description: "Live aircraft states and trails."},
 		{Name: "flights", Description: "Flight routes and schedules by callsign."},
 		{Name: "airports", Description: "Airport reference data."},
+		{Name: "airlines", Description: "Airline reference data."},
 		{Name: "search", Description: "Free text search across aircraft, airports and airlines."},
 		{Name: "stats", Description: "Service status and upstream budgets."},
 	}

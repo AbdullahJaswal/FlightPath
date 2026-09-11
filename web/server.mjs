@@ -7,7 +7,7 @@ import { Readable } from "node:stream"
 import { pipeline } from "node:stream/promises"
 import { fileURLToPath } from "node:url"
 import { promisify } from "node:util"
-import { gzip } from "node:zlib"
+import { createGzip, gzip } from "node:zlib"
 import app from "./dist/server/server.js"
 
 const port = Number(process.env.PORT ?? 3000)
@@ -123,7 +123,6 @@ async function serveStatic(req, res, pathname) {
   }
   const source = createReadStream(file)
   if (gzipped) {
-    const { createGzip } = await import("node:zlib")
     await pipeline(source, createGzip(), res)
   } else {
     await pipeline(source, res)
@@ -131,11 +130,23 @@ async function serveStatic(req, res, pathname) {
   return true
 }
 
+// the API rate limits per client address, so the address must survive the hop
+function clientAddress(req) {
+  return req.socket.remoteAddress ?? ""
+}
+
 async function render(req, res, url) {
   const headers = new Headers()
   for (const [name, value] of Object.entries(req.headers)) {
-    if (value == null) continue
+    if (value == null || name === "x-forwarded-for" || name === "x-real-ip") {
+      continue
+    }
     for (const v of [].concat(value)) headers.append(name, v)
+  }
+  const ip = clientAddress(req)
+  if (ip) {
+    headers.set("x-forwarded-for", ip)
+    headers.set("x-real-ip", ip)
   }
   const hasBody = req.method !== "GET" && req.method !== "HEAD"
   const request = new Request(url, {
@@ -156,7 +167,24 @@ async function render(req, res, url) {
     res.end()
     return
   }
-  await pipeline(Readable.fromWeb(response.body), res)
+  const type = response.headers.get("content-type") ?? ""
+  const gzipped =
+    /^(text\/|application\/(json|javascript))/.test(type) &&
+    !response.headers.has("content-encoding") &&
+    /\bgzip\b/.test(req.headers["accept-encoding"] ?? "")
+  try {
+    if (gzipped) {
+      res.removeHeader("content-length")
+      res.setHeader("content-encoding", "gzip")
+      res.setHeader("vary", "Accept-Encoding")
+      await pipeline(Readable.fromWeb(response.body), createGzip(), res)
+    } else {
+      await pipeline(Readable.fromWeb(response.body), res)
+    }
+  } catch (err) {
+    // the client went away mid response, nothing to report
+    if (!res.destroyed && !res.writableEnded) throw err
+  }
 }
 
 // Browsers only talk to this origin; the live stream is piped through to the API.
@@ -171,7 +199,12 @@ server.on("upgrade", (req, socket, head) => {
     port: apiUrl.port || 80,
     method: "GET",
     path: `${apiUrl.pathname.replace(/\/$/, "")}/live`,
-    headers: { ...req.headers, host: apiUrl.host },
+    headers: {
+      ...req.headers,
+      host: apiUrl.host,
+      "x-forwarded-for": clientAddress(req),
+      "x-real-ip": clientAddress(req),
+    },
   })
   upstream.on("upgrade", (res, upstreamSocket, upstreamHead) => {
     const lines = ["HTTP/1.1 101 Switching Protocols"]
