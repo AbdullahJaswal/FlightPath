@@ -131,7 +131,16 @@ async function serveStatic(req, res, pathname) {
 }
 
 // the API rate limits per client address, so the address must survive the hop
+const trustProxy = process.env.TRUST_PROXY === "1"
+
 function clientAddress(req) {
+  if (trustProxy) {
+    // one proxy in front, so the rightmost entry is the address it saw and a
+    // client cannot pass itself off as someone else by sending the header
+    const chain = String(req.headers["x-forwarded-for"] ?? "").split(",")
+    const seen = chain[chain.length - 1].trim()
+    if (seen) return seen
+  }
   return req.socket.remoteAddress ?? ""
 }
 

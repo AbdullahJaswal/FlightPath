@@ -17,3 +17,6 @@ web/.tanstack/
 .idea/
 .vscode/
 .DS_Store
+
+# deployment, kept out of the public repo
+infra/terraform/
