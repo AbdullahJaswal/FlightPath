@@ -13,6 +13,5 @@ export type TrailSource = (typeof TrailSource)[keyof typeof TrailSource]
 
 export const TrailSource = {
   stored: "stored",
-  opensky: "opensky",
   none: "none",
 } as const

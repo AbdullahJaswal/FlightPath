@@ -1,6 +1,10 @@
 package model
 
-import "github.com/danielgtaylor/huma/v2"
+import (
+	"strings"
+
+	"github.com/danielgtaylor/huma/v2"
+)
 
 // enumSchema registers a named string enum once and references it, so clients get a named type.
 func enumSchema(r huma.Registry, name, description string, values []string) *huma.Schema {
@@ -31,17 +35,14 @@ func (PositionSource) Schema(r huma.Registry) *huma.Schema {
 		[]string{"adsb", "asterix", "mlat", "flarm", "unknown"})
 }
 
-// PositionSourceFromOpenSky maps the OpenSky position_source field.
-func PositionSourceFromOpenSky(n int) PositionSource {
-	switch n {
-	case 0:
-		return SourceADSB
-	case 1:
-		return SourceASTERIX
-	case 2:
+// PositionSourceFromADSB maps the readsb message type. Multilateration is reported either as the
+// type or through the mlat field list, depending on the aggregator.
+func PositionSourceFromADSB(msgType string, mlat bool) PositionSource {
+	switch {
+	case msgType == "mlat" || mlat:
 		return SourceMLAT
-	case 3:
-		return SourceFLARM
+	case strings.HasPrefix(msgType, "adsb") || strings.HasPrefix(msgType, "adsr"):
+		return SourceADSB
 	}
 	return SourceUnknown
 }
@@ -75,12 +76,14 @@ var categories = []string{
 	"emergency_surface", "service_surface", "obstacle",
 }
 
-var openSkyCategories = map[int]Category{
-	2: CategoryLight, 3: CategorySmall, 4: CategoryLarge, 5: CategoryHighVortexLarge,
-	6: CategoryHeavy, 7: CategoryHighPerformance, 8: CategoryRotorcraft, 9: CategoryGlider,
-	10: CategoryLighterThanAir, 11: CategoryParachutist, 12: CategoryUltralight, 14: CategoryUAV,
-	15: CategorySpace, 16: CategoryEmergencySurface, 17: CategoryServiceSurface,
-	18: CategoryObstacle, 19: CategoryObstacle, 20: CategoryObstacle,
+// adsbCategories keys are the emitter category codes as broadcast, set A for aircraft by weight,
+// B for other airborne, C for surface.
+var adsbCategories = map[string]Category{
+	"A1": CategoryLight, "A2": CategorySmall, "A3": CategoryLarge, "A4": CategoryHighVortexLarge,
+	"A5": CategoryHeavy, "A6": CategoryHighPerformance, "A7": CategoryRotorcraft, "B1": CategoryGlider,
+	"B2": CategoryLighterThanAir, "B3": CategoryParachutist, "B4": CategoryUltralight, "B6": CategoryUAV,
+	"B7": CategorySpace, "C1": CategoryEmergencySurface, "C2": CategoryServiceSurface,
+	"C3": CategoryObstacle, "C4": CategoryObstacle, "C5": CategoryObstacle,
 }
 
 // Schema implements huma.SchemaProvider.
@@ -88,9 +91,9 @@ func (Category) Schema(r huma.Registry) *huma.Schema {
 	return enumSchema(r, "Category", "ADS-B emitter category.", categories)
 }
 
-// CategoryFromOpenSky maps the OpenSky category field.
-func CategoryFromOpenSky(n int) Category {
-	if c, ok := openSkyCategories[n]; ok {
+// CategoryFromADSB maps a broadcast emitter category code such as A3.
+func CategoryFromADSB(code string) Category {
+	if c, ok := adsbCategories[strings.ToUpper(code)]; ok {
 		return c
 	}
 	return CategoryUnknown
@@ -143,14 +146,13 @@ func (MetaSource) Schema(r huma.Registry) *huma.Schema {
 type TrailSource string
 
 const (
-	TrailStored  TrailSource = "stored"
-	TrailOpenSky TrailSource = "opensky"
-	TrailNone    TrailSource = "none"
+	TrailStored TrailSource = "stored"
+	TrailNone   TrailSource = "none"
 )
 
 // Schema implements huma.SchemaProvider.
 func (TrailSource) Schema(r huma.Registry) *huma.Schema {
-	return enumSchema(r, "TrailSource", "Origin of the trail points.", []string{"stored", "opensky", "none"})
+	return enumSchema(r, "TrailSource", "Origin of the trail points.", []string{"stored", "none"})
 }
 
 // PhotoSource identifies the site that hosts a photo.
@@ -176,6 +178,6 @@ const (
 
 // Schema implements huma.SchemaProvider.
 func (PollerMode) Schema(r huma.Registry) *huma.Schema {
-	return enumSchema(r, "PollerMode", "Poller state. Active while viewers are connected, idle otherwise, paused when out of credits, follower when another instance polls.",
+	return enumSchema(r, "PollerMode", "Poller state. Active while viewers are connected, idle otherwise, paused when rate limited or over the daily request cap, follower when another instance polls.",
 		[]string{"active", "idle", "paused", "follower", "disabled"})
 }

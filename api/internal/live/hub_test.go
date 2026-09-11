@@ -61,8 +61,10 @@ func TestHubStreamsViewport(t *testing.T) {
 	require.Equal(t, "abc123", f.Aircraft[0].ICAO24)
 
 	snaps.Set(snapshot.New(time.Now(), []model.Aircraft{{ICAO24: "abc123", Lat: 51, Lon: 9}}))
-	require.NoError(t, wsjson.Read(ctx, conn, &f))
-	require.Equal(t, 1, f.Total)
-	require.Equal(t, 51.0, f.Aircraft[0].Lat)
+	// the first snapshot can arrive twice, once for the viewport and once from the broadcast
+	for f.Aircraft[0].Lat != 51 {
+		require.NoError(t, wsjson.Read(ctx, conn, &f))
+		require.Equal(t, 1, f.Total)
+	}
 	require.Equal(t, 1, hub.Viewers())
 }

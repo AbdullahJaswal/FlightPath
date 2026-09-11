@@ -297,7 +297,7 @@ export const GetAircraftResponse = zod.object({
     .nullable()
     .describe("Positions in chronological order."),
   trailSource: zod
-    .enum(["stored", "opensky", "none"])
+    .enum(["stored", "none"])
     .describe("Origin of the trail points."),
 })
 

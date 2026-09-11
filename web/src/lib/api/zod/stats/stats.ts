@@ -25,18 +25,28 @@ export const GetStatsResponse = zod.object({
     misses: zod.int().describe("Loads from the source."),
   }),
   poller: zod.object({
-    creditsRemaining: zod.int().describe("OpenSky credits left today."),
-    creditsUsedToday: zod.int(),
-    intervalSeconds: zod.int().describe("Current poll interval."),
+    dailyCap: zod
+      .int()
+      .describe("Requests allowed per UTC day before the poller pauses."),
+    intervalSeconds: zod
+      .int()
+      .describe("Target age of the area viewers are looking at."),
     lastError: zod.string().optional(),
     lastPoll: zod.iso.datetime({ offset: true }).optional(),
     leader: zod.boolean().describe("True when this instance runs the poller."),
     mode: zod
       .enum(["active", "idle", "paused", "follower", "disabled"])
       .describe(
-        "Poller state. Active while viewers are connected, idle otherwise, paused when out of credits, follower when another instance polls."
+        "Poller state. Active while viewers are connected, idle otherwise, paused when rate limited or over the daily request cap, follower when another instance polls."
       ),
     nextPoll: zod.iso.datetime({ offset: true }).optional(),
+    requestsToday: zod
+      .int()
+      .describe("Upstream requests made since UTC midnight."),
+    sweepCells: zod.int().describe("Circles in the background world sweep."),
+    viewCells: zod
+      .int()
+      .describe("Circles currently covering viewer viewports."),
   }),
   snapshotAgeSeconds: zod.int(),
   snapshotTime: zod.iso.datetime({ offset: true }).optional(),

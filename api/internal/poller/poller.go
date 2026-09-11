@@ -1,62 +1,80 @@
-// Package poller fetches OpenSky snapshots on a credit-aware schedule.
+// Package poller keeps the live snapshot fresh from a radius limited ADS-B feed, one circle at a time.
 package poller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"math"
+	"sort"
 	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
 
+	"github.com/AbdullahJaswal/flightpath/api/internal/adsb"
 	"github.com/AbdullahJaswal/flightpath/api/internal/cache"
 	"github.com/AbdullahJaswal/flightpath/api/internal/flights"
 	"github.com/AbdullahJaswal/flightpath/api/internal/model"
-	"github.com/AbdullahJaswal/flightpath/api/internal/opensky"
 	"github.com/AbdullahJaswal/flightpath/api/internal/snapshot"
 	"github.com/AbdullahJaswal/flightpath/api/internal/store"
 )
 
 const (
-	pollCost         = 4
-	anonymousCredits = 400
-	snapshotKey      = "snapshot:latest"
-	snapshotChannel  = "snapshot"
-	leaderKey        = "poller:leader"
-	creditsKey       = "opensky:credits"
-	leaderTTL        = 90 * time.Second
-	minStoreGap      = 5 * time.Minute
-	trailBatchLimit  = 500
-	headingDelta     = 10.0
-	altitudeDelta    = 100.0
-	retentionEvery   = 10 * time.Minute
-	staleAfter       = time.Hour
+	snapshotKey     = "snapshot:latest"
+	snapshotChannel = "snapshot"
+	leaderKey       = "poller:leader"
+	requestsKey     = "adsb:requests:"
+	leaderTTL       = 90 * time.Second
+	minStoreGap     = 5 * time.Minute
+	trailBatchLimit = 500
+	headingDelta    = 10.0
+	altitudeDelta   = 100.0
+	retentionEvery  = 10 * time.Minute
+	staleAfter      = time.Hour
+	// keepFor bounds how long an aircraft stays in the snapshot without a fresh report. It matches
+	// how long the web client is willing to dead reckon a position forward.
+	keepFor       = 10 * time.Minute
+	publishEvery  = 5 * time.Second
+	rateLimitWait = time.Minute
+	errorWait     = 30 * time.Second
+	errorStreak   = 3
+	idleCheck     = time.Second
 )
 
-// wakeCheckEvery is how often an idle poller looks for viewers. A variable so tests can shorten it.
-var wakeCheckEvery = 5 * time.Second
+// Source answers one circle query with every aircraft within the radius of a point.
+type Source interface {
+	Circle(ctx context.Context, lat, lon float64, radiusNM int) (*adsb.Batch, error)
+}
 
 type Config struct {
-	InstanceID     string
+	InstanceID string
+	RadiusNM   int
+	// MinInterval is the gap between requests while someone is watching, IdleInterval otherwise.
+	MinInterval  time.Duration
+	IdleInterval time.Duration
+	// ActiveInterval is how old a cell may get before it is fetched again.
 	ActiveInterval time.Duration
-	IdleInterval   time.Duration
-	DailyCredits   int
-	CreditReserve  int
+	// MaxCells caps the circles spent on one viewport; wider views keep the middle live.
+	MaxCells       int
+	DailyRequests  int
+	WorldSweep     bool
 	TrailRetention time.Duration
 }
 
 type Status struct {
-	Mode             model.PollerMode
-	Leader           bool
-	Interval         time.Duration
-	LastPoll         time.Time
-	NextPoll         time.Time
-	CreditsRemaining int
-	CreditsUsedToday int
-	AircraftCount    int
-	LastError        string
+	Mode          model.PollerMode
+	Leader        bool
+	Interval      time.Duration
+	LastPoll      time.Time
+	NextPoll      time.Time
+	RequestsToday int
+	DailyCap      int
+	ViewCells     int
+	SweepCells    int
+	AircraftCount int
+	LastError     string
 }
 
 type lastPos struct {
@@ -67,36 +85,49 @@ type lastPos struct {
 }
 
 type Poller struct {
-	cfg    Config
-	client *opensky.Client
-	snaps  *snapshot.Store
-	cache  *cache.Cache
-	store  *store.Store
-	rdb    *redis.Client
-	log    *slog.Logger
-	now    func() time.Time
+	cfg     Config
+	source  Source
+	lattice *Lattice
+	sweep   []Cell
+	snaps   *snapshot.Store
+	cache   *cache.Cache
+	store   *store.Store
+	rdb     *redis.Client
+	log     *slog.Logger
+	now     func() time.Time
 
 	mu            sync.Mutex
 	status        Status
-	creditsDay    string
+	requestsDay   string
+	fetched       map[string]time.Time
+	retryAt       map[string]time.Time
+	state         map[string]model.Aircraft
 	last          map[string]lastPos
 	lastRetention time.Time
+	lastPublish   time.Time
+	failures      int
 }
 
-func New(cfg Config, client *opensky.Client, snaps *snapshot.Store, c *cache.Cache, st *store.Store, rdb *redis.Client, log *slog.Logger) *Poller {
+func New(cfg Config, source Source, snaps *snapshot.Store, c *cache.Cache, st *store.Store, rdb *redis.Client, log *slog.Logger) *Poller {
 	p := &Poller{
-		cfg:    cfg,
-		client: client,
-		snaps:  snaps,
-		cache:  c,
-		store:  st,
-		rdb:    rdb,
-		log:    log,
-		now:    time.Now,
-		status: Status{Mode: model.ModeIdle},
-		last:   make(map[string]lastPos),
+		cfg:     cfg,
+		source:  source,
+		lattice: NewLattice(cfg.RadiusNM),
+		snaps:   snaps,
+		cache:   c,
+		store:   st,
+		rdb:     rdb,
+		log:     log,
+		now:     time.Now,
+		fetched: make(map[string]time.Time),
+		retryAt: make(map[string]time.Time),
+		state:   make(map[string]model.Aircraft),
+		last:    make(map[string]lastPos),
 	}
-	p.status.CreditsRemaining = p.budget()
+	if cfg.WorldSweep {
+		p.sweep = p.lattice.Sweep(sweepRegions)
+	}
+	p.status = Status{Mode: model.ModeIdle, Interval: cfg.ActiveInterval, DailyCap: cfg.DailyRequests, SweepCells: len(p.sweep)}
 	return p
 }
 
@@ -112,9 +143,9 @@ func (p *Poller) update(fn func(*Status)) {
 	p.mu.Unlock()
 }
 
-// Run polls until ctx is cancelled. Only the instance holding the Redis leader lock polls.
+// Run fetches until ctx is cancelled. Only the instance holding the Redis leader lock fetches.
 func (p *Poller) Run(ctx context.Context) error {
-	p.restoreCredits(ctx)
+	p.restoreRequests(ctx)
 	defer p.releaseLeader()
 	for {
 		if !p.acquireLeader(ctx) {
@@ -125,44 +156,47 @@ func (p *Poller) Run(ctx context.Context) error {
 			continue
 		}
 		p.rollover()
-		interval, mode := p.pace(p.viewers(ctx), p.now())
-		if mode == model.ModePaused {
+		now := p.now()
+		if p.Status().RequestsToday >= p.cfg.DailyRequests {
+			wait := min(untilReset(now), time.Minute)
 			p.update(func(s *Status) {
-				s.Mode = mode
+				s.Mode = model.ModePaused
 				s.Leader = true
-				s.Interval = interval
-				s.NextPoll = p.now().Add(interval)
+				s.NextPoll = now.Add(wait)
 			})
-			if !sleep(ctx, interval) {
+			if !sleep(ctx, wait) {
 				return nil
 			}
 			continue
 		}
-		if wait := p.fresh(interval); wait > 0 {
+		mode, gap := model.ModeIdle, p.cfg.IdleInterval
+		if p.viewers(ctx) > 0 {
+			mode, gap = model.ModeActive, p.cfg.MinInterval
+		}
+		cell, ok := p.next(now, p.views(ctx))
+		if !ok {
 			p.update(func(s *Status) {
 				s.Mode = mode
 				s.Leader = true
-				s.Interval = interval
-				s.NextPoll = p.now().Add(wait)
+				s.NextPoll = now.Add(idleCheck)
 			})
-			if !p.wait(ctx, wait, mode) {
+			if !sleep(ctx, idleCheck) {
 				return nil
 			}
 			continue
 		}
-		err := p.poll(ctx)
-		var rl *opensky.RateLimitError
+		err := p.fetch(ctx, cell)
+		var rl *adsb.RateLimitError
 		switch {
 		case errors.As(err, &rl):
 			wait := rl.RetryAfter
 			if wait <= 0 {
-				wait = 15 * time.Minute
+				wait = rateLimitWait
 			}
-			p.log.Warn("opensky rate limited", "retry_after", wait)
+			p.log.Warn("adsb rate limited", "retry_after", wait)
 			p.update(func(s *Status) {
 				s.Mode = model.ModePaused
 				s.Leader = true
-				s.CreditsRemaining = 0
 				s.LastError = err.Error()
 				s.NextPoll = p.now().Add(wait)
 			})
@@ -174,135 +208,96 @@ func (p *Poller) Run(ctx context.Context) error {
 			if ctx.Err() != nil {
 				return nil
 			}
-			p.log.Warn("poll failed", "err", err)
+			p.log.Warn("adsb fetch failed", "cell", cell.Key, "err", err)
 			p.update(func(s *Status) {
+				s.Mode = mode
 				s.Leader = true
 				s.LastError = err.Error()
-				s.NextPoll = p.now().Add(30 * time.Second)
 			})
-			if !sleep(ctx, 30*time.Second) {
-				return nil
+			// one bad cell moves on, an upstream outage slows the whole loop down
+			p.mu.Lock()
+			if p.failures >= errorStreak {
+				gap = errorWait
 			}
-			continue
+			p.mu.Unlock()
+		default:
+			p.update(func(s *Status) {
+				s.Mode = mode
+				s.Leader = true
+				s.LastError = ""
+			})
 		}
 		p.update(func(s *Status) {
-			s.Mode = mode
-			s.Leader = true
-			s.Interval = interval
-			s.NextPoll = p.now().Add(interval)
-			s.LastError = ""
+			s.Interval = p.cfg.ActiveInterval
+			s.NextPoll = p.now().Add(gap)
 		})
-		if !p.wait(ctx, interval, mode) {
+		if !sleep(ctx, gap) {
 			return nil
 		}
 	}
 }
 
-// wait sleeps until the next poll. While idle it checks for viewers every few seconds and returns
-// early once someone connects, so the map refreshes within seconds instead of a full idle period.
-func (p *Poller) wait(ctx context.Context, d time.Duration, mode model.PollerMode) bool {
-	if mode != model.ModeIdle {
-		return sleep(ctx, d)
-	}
-	deadline := p.now().Add(d)
-	earliest := p.Status().LastPoll.Add(p.cfg.ActiveInterval)
-	for {
-		remaining := deadline.Sub(p.now())
-		if remaining <= 0 {
-			return true
-		}
-		if !sleep(ctx, min(remaining, wakeCheckEvery)) {
-			return false
-		}
-		if p.viewers(ctx) > 0 && !p.now().Before(earliest) {
-			return true
+// next picks the most overdue cell under a viewport, then the most overdue sweep cell, and nothing
+// when everything is fresher than the active interval.
+func (p *Poller) next(now time.Time, views []snapshot.Bounds) (Cell, bool) {
+	want := map[string]Cell{}
+	for _, v := range views {
+		for _, c := range p.lattice.Cover(v, p.cfg.MaxCells) {
+			want[c.Key] = c
 		}
 	}
-}
-
-// pace picks the next interval from the remaining credits and whether anyone is watching.
-func (p *Poller) pace(viewers int, now time.Time) (time.Duration, model.PollerMode) {
-	s := p.Status()
-	reset := untilReset(now)
-	if s.CreditsRemaining < pollCost {
-		return reset, model.ModePaused
+	keys := make([]string, 0, len(want))
+	for k := range want {
+		keys = append(keys, k)
 	}
-	usable := s.CreditsRemaining - p.reserve()
-	if viewers <= 0 || usable < pollCost {
-		return p.cfg.IdleInterval, model.ModeIdle
+	sort.Strings(keys)
+	view := make([]Cell, 0, len(keys))
+	for _, k := range keys {
+		view = append(view, want[k])
 	}
-	polls := usable / pollCost
-	interval := time.Duration(math.Ceil(reset.Seconds()/float64(polls))) * time.Second
-	if interval < p.cfg.ActiveInterval {
-		interval = p.cfg.ActiveInterval
-	}
-	if interval > p.cfg.IdleInterval {
-		interval = p.cfg.IdleInterval
-	}
-	return interval, model.ModeActive
-}
-
-// fresh returns how long to wait when the current snapshot, typically loaded from Redis after a restart, is younger than the interval.
-func (p *Poller) fresh(interval time.Duration) time.Duration {
-	cur := p.snaps.Current()
-	if cur == nil {
-		return 0
-	}
-	if age := p.now().Sub(cur.Time); age < interval {
-		return interval - age
-	}
-	return 0
-}
-
-// budget is the daily credit allowance for the current access mode.
-func (p *Poller) budget() int {
-	if p.client.Anonymous() && p.cfg.DailyCredits > anonymousCredits {
-		return anonymousCredits
-	}
-	return p.cfg.DailyCredits
-}
-
-// reserve keeps credits back for idle polling, at most a tenth of the budget so small budgets still allow active polling.
-func (p *Poller) reserve() int {
-	return min(p.cfg.CreditReserve, p.budget()/10)
-}
-
-// untilReset is the time until the next UTC midnight, when OpenSky credits refresh.
-func untilReset(now time.Time) time.Duration {
-	u := now.UTC()
-	next := time.Date(u.Year(), u.Month(), u.Day()+1, 0, 1, 0, 0, time.UTC)
-	return next.Sub(u)
-}
-
-// rollover restores the daily budget once the UTC date changes.
-func (p *Poller) rollover() {
-	day := p.now().UTC().Format(time.DateOnly)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.creditsDay == day {
-		return
+	p.status.ViewCells = len(view)
+	if c, ok := p.overdue(now, view); ok {
+		return c, true
 	}
-	p.creditsDay = day
-	p.status.CreditsUsedToday = 0
-	p.status.CreditsRemaining = p.budget()
+	return p.overdue(now, p.sweep)
 }
 
-func (p *Poller) poll(ctx context.Context) error {
-	states, err := p.client.States(ctx)
-	if err != nil {
-		return err
-	}
-	now := p.now()
-	snap := snapshot.New(states.Time, states.Aircraft)
-	p.snaps.Set(snap)
-	if b, err := snapshot.Marshal(snap); err == nil {
-		if err := p.cache.PutRaw(ctx, snapshotKey, b, p.cfg.IdleInterval+5*time.Minute); err != nil {
-			p.log.Warn("snapshot cache write failed", "err", err)
-		} else if err := p.rdb.Publish(ctx, snapshotChannel, p.cfg.InstanceID).Err(); err != nil {
-			p.log.Warn("snapshot publish failed", "err", err)
+func (p *Poller) overdue(now time.Time, cells []Cell) (Cell, bool) {
+	var best Cell
+	bestAge := time.Duration(-1)
+	for _, c := range cells {
+		if p.retryAt[c.Key].After(now) {
+			continue
+		}
+		age := now.Sub(p.fetched[c.Key])
+		if age >= p.cfg.ActiveInterval && age > bestAge {
+			best, bestAge = c, age
 		}
 	}
-	if rows := p.downsample(states.Aircraft, now); len(rows) > 0 {
+	return best, bestAge >= 0
+}
+
+func (p *Poller) fetch(ctx context.Context, cell Cell) error {
+	batch, err := p.source.Circle(ctx, cell.Lat, cell.Lon, p.cfg.RadiusNM)
+	now := p.now()
+	// failed requests count too, the upstream still served them
+	p.count(ctx, now)
+	if err != nil {
+		p.mu.Lock()
+		p.retryAt[cell.Key] = now.Add(errorWait)
+		p.failures++
+		p.mu.Unlock()
+		return err
+	}
+	p.mu.Lock()
+	p.fetched[cell.Key] = now
+	p.failures = 0
+	p.mu.Unlock()
+	snap := p.merge(batch, now)
+	p.publish(ctx, snap, now)
+	if rows := p.downsample(batch.Aircraft, now); len(rows) > 0 {
 		if err := p.store.InsertPositions(ctx, rows); err != nil {
 			p.log.Warn("position insert failed", "err", err, "rows", len(rows))
 		} else {
@@ -310,38 +305,103 @@ func (p *Poller) poll(ctx context.Context) error {
 		}
 	}
 	p.retain(ctx, now)
-	day := now.UTC().Format(time.DateOnly)
-	if err := p.store.AddUsage(ctx, "opensky", day, pollCost); err != nil {
-		p.log.Debug("usage write failed", "err", err)
-	}
 	p.update(func(s *Status) {
 		s.LastPoll = now
-		s.AircraftCount = len(states.Aircraft)
-		s.CreditsUsedToday += pollCost
-		if states.Quota.Remaining >= 0 {
-			s.CreditsRemaining = states.Quota.Remaining
-		} else {
-			s.CreditsRemaining = max(0, s.CreditsRemaining-pollCost)
-		}
+		s.AircraftCount = snap.Len()
 	})
-	remaining := p.Status().CreditsRemaining
-	if err := p.rdb.Set(ctx, creditsKey, remaining, untilReset(now)).Err(); err != nil {
-		p.log.Debug("credits write failed", "err", err)
-	}
-	p.log.Info("poll", "aircraft", len(states.Aircraft), "credits_remaining", remaining)
+	p.log.Debug("fetched", "cell", cell.Key, "aircraft", len(batch.Aircraft), "tracked", snap.Len())
 	return nil
 }
 
-// restoreCredits picks up the last known credit count so a restart does not reset the budget.
-func (p *Poller) restoreCredits(ctx context.Context) {
-	v, err := p.rdb.Get(ctx, creditsKey).Int()
+// merge folds a circle into the tracked aircraft and publishes a new snapshot. Circles overlap, so
+// a report only replaces an older one, and aircraft nobody has reported for a while drop out.
+func (p *Poller) merge(b *adsb.Batch, now time.Time) *snapshot.Snapshot {
+	p.mu.Lock()
+	for _, a := range b.Aircraft {
+		if prev, ok := p.state[a.ICAO24]; ok && prev.PositionAt.After(a.PositionAt) {
+			continue
+		}
+		p.state[a.ICAO24] = a
+	}
+	list := make([]model.Aircraft, 0, len(p.state))
+	for k, a := range p.state {
+		if now.Sub(a.LastContact) > keepFor {
+			delete(p.state, k)
+			continue
+		}
+		list = append(list, a)
+	}
+	p.mu.Unlock()
+	snap := snapshot.New(now, list)
+	p.snaps.Set(snap)
+	return snap
+}
+
+// publish shares the snapshot through Redis for restarts and other instances, a few seconds apart
+// rather than after every circle.
+func (p *Poller) publish(ctx context.Context, snap *snapshot.Snapshot, now time.Time) {
+	p.mu.Lock()
+	due := now.Sub(p.lastPublish) >= publishEvery
+	if due {
+		p.lastPublish = now
+	}
+	p.mu.Unlock()
+	if !due {
+		return
+	}
+	b, err := snapshot.Marshal(snap)
 	if err != nil {
 		return
 	}
+	if err := p.cache.PutRaw(ctx, snapshotKey, b, keepFor+5*time.Minute); err != nil {
+		p.log.Warn("snapshot cache write failed", "err", err)
+		return
+	}
+	if err := p.rdb.Publish(ctx, snapshotChannel, p.cfg.InstanceID).Err(); err != nil {
+		p.log.Warn("snapshot publish failed", "err", err)
+	}
+}
+
+func (p *Poller) count(ctx context.Context, now time.Time) {
+	p.update(func(s *Status) { s.RequestsToday++ })
+	key := requestsKey + now.UTC().Format(time.DateOnly)
+	pipe := p.rdb.TxPipeline()
+	pipe.Incr(ctx, key)
+	pipe.Expire(ctx, key, 48*time.Hour)
+	if _, err := pipe.Exec(ctx); err != nil {
+		p.log.Debug("request count write failed", "err", err)
+	}
+}
+
+// restoreRequests picks up today's count so a restart does not forget the budget already spent.
+func (p *Poller) restoreRequests(ctx context.Context) {
+	day := p.now().UTC().Format(time.DateOnly)
+	n, err := p.rdb.Get(ctx, requestsKey+day).Int()
 	p.mu.Lock()
-	p.creditsDay = p.now().UTC().Format(time.DateOnly)
-	p.status.CreditsRemaining = v
-	p.mu.Unlock()
+	defer p.mu.Unlock()
+	p.requestsDay = day
+	if err == nil {
+		p.status.RequestsToday = n
+	}
+}
+
+// rollover resets the daily count once the UTC date changes.
+func (p *Poller) rollover() {
+	day := p.now().UTC().Format(time.DateOnly)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.requestsDay == day {
+		return
+	}
+	p.requestsDay = day
+	p.status.RequestsToday = 0
+}
+
+// untilReset is the time until the daily request cap refreshes at UTC midnight.
+func untilReset(now time.Time) time.Duration {
+	u := now.UTC()
+	next := time.Date(u.Year(), u.Month(), u.Day()+1, 0, 1, 0, 0, time.UTC)
+	return next.Sub(u)
 }
 
 // downsample keeps a position when enough time passed or the aircraft turned or changed altitude.
@@ -437,33 +497,53 @@ func (p *Poller) releaseLeader() {
 
 // viewers sums the live connection counts every instance reports to Redis.
 func (p *Poller) viewers(ctx context.Context) int {
-	iter := p.rdb.Scan(ctx, 0, "viewers:*", 100).Iterator()
+	total := 0
+	for _, v := range p.reports(ctx, "viewers:*") {
+		n := 0
+		for _, ch := range v {
+			if ch < '0' || ch > '9' {
+				n = 0
+				break
+			}
+			n = n*10 + int(ch-'0')
+		}
+		total += n
+	}
+	return total
+}
+
+// views gathers the viewports every instance reports to Redis.
+func (p *Poller) views(ctx context.Context) []snapshot.Bounds {
+	var out []snapshot.Bounds
+	for _, v := range p.reports(ctx, "views:*") {
+		var b []snapshot.Bounds
+		if err := json.Unmarshal([]byte(v), &b); err == nil {
+			out = append(out, b...)
+		}
+	}
+	return out
+}
+
+func (p *Poller) reports(ctx context.Context, pattern string) []string {
+	iter := p.rdb.Scan(ctx, 0, pattern, 100).Iterator()
 	var keys []string
 	for iter.Next(ctx) {
 		keys = append(keys, iter.Val())
 	}
 	if len(keys) == 0 {
-		return 0
+		return nil
 	}
 	vals, err := p.rdb.MGet(ctx, keys...).Result()
 	if err != nil {
-		return 0
+		return nil
 	}
-	total := 0
+	out := make([]string, 0, len(vals))
 	for _, v := range vals {
 		if s, ok := v.(string); ok {
-			n := 0
-			for _, ch := range s {
-				if ch < '0' || ch > '9' {
-					n = 0
-					break
-				}
-				n = n*10 + int(ch-'0')
-			}
-			total += n
+			out = append(out, s)
 		}
 	}
-	return total
+	return out
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {

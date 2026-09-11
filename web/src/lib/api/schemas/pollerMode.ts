@@ -7,7 +7,7 @@
  */
 
 /**
- * Poller state. Active while viewers are connected, idle otherwise, paused when out of credits, follower when another instance polls.
+ * Poller state. Active while viewers are connected, idle otherwise, paused when rate limited or over the daily request cap, follower when another instance polls.
  */
 export type PollerMode = (typeof PollerMode)[keyof typeof PollerMode]
 

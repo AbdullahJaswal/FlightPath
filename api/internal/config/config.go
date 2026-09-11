@@ -24,20 +24,23 @@ type Config struct {
 	TrailRetention     time.Duration `env:"TRAIL_RETENTION" envDefault:"6h"`
 	SnapshotStaleAfter time.Duration `env:"SNAPSHOT_STALE_AFTER" envDefault:"3m"`
 
-	OpenSky       OpenSky       `envPrefix:"OPENSKY_"`
+	ADSB          ADSB          `envPrefix:"ADSB_"`
 	Aviationstack Aviationstack `envPrefix:"AVIATIONSTACK_"`
 	ADSBDB        ADSBDB        `envPrefix:"ADSBDB_"`
 	Planespotters Planespotters `envPrefix:"PLANESPOTTERS_"`
 }
 
-type OpenSky struct {
-	ClientID       string        `env:"CLIENT_ID"`
-	ClientSecret   string        `env:"CLIENT_SECRET"`
-	DailyCredits   int           `env:"DAILY_CREDITS" envDefault:"4000"`
-	CreditReserve  int           `env:"CREDIT_RESERVE" envDefault:"400"`
-	ActiveInterval time.Duration `env:"ACTIVE_INTERVAL" envDefault:"15s"`
-	IdleInterval   time.Duration `env:"IDLE_INTERVAL" envDefault:"15m"`
-	TracksEnabled  bool          `env:"TRACKS_ENABLED" envDefault:"true"`
+// ADSB configures the position feed, a readsb style aggregator queried one circle at a time.
+type ADSB struct {
+	BaseURL        string        `env:"BASE_URL" envDefault:"https://opendata.adsb.fi/api/v3"`
+	UserAgent      string        `env:"USER_AGENT" envDefault:"Flightpath/1.0 (+https://abdullahjaswal.dev/)"`
+	RadiusNM       int           `env:"RADIUS_NM" envDefault:"250"`
+	MinInterval    time.Duration `env:"MIN_INTERVAL" envDefault:"1200ms"`
+	ActiveInterval time.Duration `env:"ACTIVE_INTERVAL" envDefault:"10s"`
+	IdleInterval   time.Duration `env:"IDLE_INTERVAL" envDefault:"3s"`
+	MaxCells       int           `env:"MAX_CELLS" envDefault:"12"`
+	DailyRequests  int           `env:"DAILY_REQUESTS" envDefault:"60000"`
+	WorldSweep     bool          `env:"WORLD_SWEEP" envDefault:"true"`
 }
 
 type Aviationstack struct {

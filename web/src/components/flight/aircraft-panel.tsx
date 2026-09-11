@@ -391,13 +391,7 @@ export function AircraftPanel({
           {infoLoading ? (
             <RowSkeleton index={2} />
           ) : trail.length > 1 && firstPoint && lastPoint ? (
-            <DetailRow
-              icon={IconTimeline}
-              label="Recorded"
-              hint={
-                detail?.trailSource === "opensky" ? "via OpenSky" : "stored"
-              }
-            >
+            <DetailRow icon={IconTimeline} label="Recorded" hint="stored">
               {formatInt(trail.length)} points over{" "}
               {formatDuration(
                 secondsSince(firstPoint.time, Date.parse(lastPoint.time))

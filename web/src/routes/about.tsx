@@ -50,16 +50,19 @@ function About() {
         </p>
         <p>
           Positions between updates are extrapolated from the last known heading
-          and speed, so the map keeps moving while the next snapshot is on its
-          way. It is a hobby project and not a source for operational or
-          navigational decisions.
+          and speed, so the map keeps moving while the next report is on its
+          way. The area you are looking at refreshes every few seconds; the rest
+          of the world is swept in the background a little at a time. It is a
+          hobby project and not a source for operational or navigational
+          decisions.
         </p>
       </PageSection>
 
       <PageSection icon={IconSatellite} title="Data sources">
         <ul className="flex flex-col gap-1">
           <li>
-            Positions: The OpenSky Network, used under its non-commercial terms
+            Positions: adsb.fi, community ADS-B data used under its
+            non-commercial terms
           </li>
           <li>Routes: adsbdb</li>
           <li>Schedules: aviationstack</li>

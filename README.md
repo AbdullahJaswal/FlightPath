@@ -1,6 +1,6 @@
 # Flightpath
 
-Live aircraft on a world map or a globe with flight, airport and airline details, altitude colours, day and night, weather radar, filters, insights, a replay of the last hour and a command palette. Positions come from the OpenSky Network, routes from adsbdb, schedules from aviationstack, photos from Planespotters.net, and reference data from OurAirports, OpenFlights and the OpenSky aircraft database. A personal, non-commercial project that runs on free tiers.
+Live aircraft on a world map or a globe with flight, airport and airline details, altitude colours, day and night, weather radar, filters, insights, a replay of the last hour and a command palette. Positions come from adsb.fi, routes from adsbdb, schedules from aviationstack, photos from Planespotters.net, and reference data from OurAirports, OpenFlights and the OpenSky aircraft database. A personal, non-commercial project that runs on free tiers.
 
 ## Stack
 
@@ -12,7 +12,7 @@ Live aircraft on a world map or a globe with flight, airport and airline details
 
 | Path | Contents |
 |---|---|
-| `api/cmd/api` | HTTP server and OpenSky poller |
+| `api/cmd/api` | HTTP server and position poller |
 | `api/cmd/seed` | Loads airport, airline and aircraft reference data |
 | `api/internal` | Config, snapshot index, tiered cache, poller, upstream clients, store, API operations, live hub |
 | `web/src/routes` | Map, about, terms and privacy pages plus the `/bff` server route |
@@ -24,7 +24,7 @@ Live aircraft on a world map or a globe with flight, airport and airline details
 
 ## How it works
 
-- One poller instance fetches global positions from OpenSky on a credit-aware schedule and shares each snapshot with every instance through Redis.
+- One poller instance fetches positions one 250 nm circle at a time, the areas viewers are looking at first and a background sweep of busy airspace after, and shares each snapshot with every instance through Redis.
 - Browsers open a WebSocket, send their viewport and receive the aircraft inside it after every poll. The map draws them on a canvas and extrapolates positions between snapshots.
 - The browser only talks to the web app. Its `/bff` route forwards API calls with cache headers and ETags intact, and the live stream is proxied to the API WebSocket.
 - An in-process cache in front of Redis serves metadata. Invalidations fan out to all instances and expirations are bounded so nothing outlives its source.
@@ -49,7 +49,7 @@ cd web && pnpm api && pnpm lint && pnpm typecheck
 
 ## Data sources
 
-- OpenSky Network, non-commercial use
+- adsb.fi, personal non-commercial use with attribution
 - adsbdb
 - aviationstack
 - OurAirports

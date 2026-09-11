@@ -8,10 +8,9 @@
 import type { PollerMode } from "./pollerMode.ts"
 
 export interface PollerStatus {
-  /** OpenSky credits left today. */
-  creditsRemaining: number
-  creditsUsedToday: number
-  /** Current poll interval. */
+  /** Requests allowed per UTC day before the poller pauses. */
+  dailyCap: number
+  /** Target age of the area viewers are looking at. */
   intervalSeconds: number
   lastError?: string
   lastPoll?: string
@@ -19,4 +18,10 @@ export interface PollerStatus {
   leader: boolean
   mode: PollerMode
   nextPoll?: string
+  /** Upstream requests made since UTC midnight. */
+  requestsToday: number
+  /** Circles in the background world sweep. */
+  sweepCells: number
+  /** Circles currently covering viewer viewports. */
+  viewCells: number
 }

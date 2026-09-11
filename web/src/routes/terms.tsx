@@ -38,8 +38,8 @@ function Terms() {
 
       <PageSection icon={IconSatellite} title="Data providers">
         <p>
-          Aircraft positions are provided by The OpenSky Network under its terms
-          for non-commercial use. Routes come from adsbdb, schedules from
+          Aircraft positions are provided by adsb.fi under its terms for
+          personal, non-commercial use. Routes come from adsbdb, schedules from
           aviationstack, airports from OurAirports and airlines from
           OpenFlights. Aircraft photos are shown from Planespotters.net with the
           photographer credited and belong to their authors. Weather radar comes

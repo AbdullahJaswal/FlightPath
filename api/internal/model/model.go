@@ -177,14 +177,16 @@ type SearchResult struct {
 
 // PollerStatus reports the position poller.
 type PollerStatus struct {
-	Mode             PollerMode `json:"mode"`
-	Leader           bool       `json:"leader" doc:"True when this instance runs the poller."`
-	IntervalSeconds  int        `json:"intervalSeconds" doc:"Current poll interval."`
-	LastPoll         *time.Time `json:"lastPoll,omitempty"`
-	NextPoll         *time.Time `json:"nextPoll,omitempty"`
-	CreditsRemaining int        `json:"creditsRemaining" doc:"OpenSky credits left today."`
-	CreditsUsedToday int        `json:"creditsUsedToday"`
-	LastError        string     `json:"lastError,omitempty"`
+	Mode            PollerMode `json:"mode"`
+	Leader          bool       `json:"leader" doc:"True when this instance runs the poller."`
+	IntervalSeconds int        `json:"intervalSeconds" doc:"Target age of the area viewers are looking at."`
+	LastPoll        *time.Time `json:"lastPoll,omitempty"`
+	NextPoll        *time.Time `json:"nextPoll,omitempty"`
+	RequestsToday   int        `json:"requestsToday" doc:"Upstream requests made since UTC midnight."`
+	DailyCap        int        `json:"dailyCap" doc:"Requests allowed per UTC day before the poller pauses."`
+	ViewCells       int        `json:"viewCells" doc:"Circles currently covering viewer viewports."`
+	SweepCells      int        `json:"sweepCells" doc:"Circles in the background world sweep."`
+	LastError       string     `json:"lastError,omitempty"`
 }
 
 // QuotaStatus reports a monthly request budget.

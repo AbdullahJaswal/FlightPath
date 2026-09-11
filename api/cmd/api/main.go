@@ -1,4 +1,4 @@
-// Command api serves the Flightpath HTTP API and runs the OpenSky poller.
+// Command api serves the Flightpath HTTP API and runs the position poller.
 package main
 
 import (
@@ -20,6 +20,7 @@ import (
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/AbdullahJaswal/flightpath/api/internal/adsb"
 	"github.com/AbdullahJaswal/flightpath/api/internal/adsbdb"
 	"github.com/AbdullahJaswal/flightpath/api/internal/api"
 	"github.com/AbdullahJaswal/flightpath/api/internal/aviationstack"
@@ -28,7 +29,6 @@ import (
 	"github.com/AbdullahJaswal/flightpath/api/internal/flights"
 	"github.com/AbdullahJaswal/flightpath/api/internal/live"
 	"github.com/AbdullahJaswal/flightpath/api/internal/model"
-	"github.com/AbdullahJaswal/flightpath/api/internal/opensky"
 	"github.com/AbdullahJaswal/flightpath/api/internal/planespotters"
 	"github.com/AbdullahJaswal/flightpath/api/internal/poller"
 	"github.com/AbdullahJaswal/flightpath/api/internal/server"
@@ -89,8 +89,8 @@ func run() error {
 	instance := instanceID()
 	c := cache.New(rdb, 20000, log)
 	snaps := snapshot.NewStore()
-	osky := opensky.New(opensky.Config{ClientID: cfg.OpenSky.ClientID, ClientSecret: cfg.OpenSky.ClientSecret})
-	adsb := adsbdb.New(cfg.ADSBDB.BaseURL, nil)
+	feed := adsb.New(adsb.Config{BaseURL: cfg.ADSB.BaseURL, UserAgent: cfg.ADSB.UserAgent})
+	routes := adsbdb.New(cfg.ADSBDB.BaseURL, nil)
 	var avs *aviationstack.Client
 	if cfg.Aviationstack.APIKey != "" {
 		avs = aviationstack.New(cfg.Aviationstack.BaseURL, cfg.Aviationstack.APIKey, nil)
@@ -102,19 +102,21 @@ func run() error {
 	svc := flights.New(flights.Config{
 		AviationstackCap: cfg.Aviationstack.MonthlyCap,
 		TrailRetention:   cfg.TrailRetention,
-		TracksEnabled:    cfg.OpenSky.TracksEnabled,
-	}, snaps, st, c, adsb, avs, osky, photos, log)
+	}, snaps, st, c, routes, avs, photos, log)
 
 	var pl *poller.Poller
 	if cfg.PollerEnabled {
 		pl = poller.New(poller.Config{
 			InstanceID:     instance,
-			ActiveInterval: cfg.OpenSky.ActiveInterval,
-			IdleInterval:   cfg.OpenSky.IdleInterval,
-			DailyCredits:   cfg.OpenSky.DailyCredits,
-			CreditReserve:  cfg.OpenSky.CreditReserve,
+			RadiusNM:       cfg.ADSB.RadiusNM,
+			MinInterval:    cfg.ADSB.MinInterval,
+			ActiveInterval: cfg.ADSB.ActiveInterval,
+			IdleInterval:   cfg.ADSB.IdleInterval,
+			MaxCells:       cfg.ADSB.MaxCells,
+			DailyRequests:  cfg.ADSB.DailyRequests,
+			WorldSweep:     cfg.ADSB.WorldSweep,
 			TrailRetention: cfg.TrailRetention,
-		}, osky, snaps, c, st, rdb, log)
+		}, feed, snaps, c, st, rdb, log)
 	}
 	hub := live.NewHub(live.Config{
 		InstanceID:     instance,
@@ -146,7 +148,7 @@ func run() error {
 	}
 	srv := server.New(cfg, version, deps, hub, ready, log)
 
-	log.Info("starting", "version", version, "instance", instance, "poller", cfg.PollerEnabled, "opensky_anonymous", osky.Anonymous(), "aviationstack", avs != nil, "planespotters", photos != nil)
+	log.Info("starting", "version", version, "instance", instance, "poller", cfg.PollerEnabled, "feed", cfg.ADSB.BaseURL, "aviationstack", avs != nil, "planespotters", photos != nil)
 	syncer := poller.NewSyncer(instance, rdb, c, snaps, log)
 	syncer.Load(ctx)
 	g, gctx := errgroup.WithContext(ctx)
@@ -176,12 +178,14 @@ func stats(ctx context.Context, snaps *snapshot.Store, pl *poller.Poller, hub *l
 	if pl != nil {
 		ps := pl.Status()
 		s.Poller = model.PollerStatus{
-			Mode:             ps.Mode,
-			Leader:           ps.Leader,
-			IntervalSeconds:  int(ps.Interval.Seconds()),
-			CreditsRemaining: ps.CreditsRemaining,
-			CreditsUsedToday: ps.CreditsUsedToday,
-			LastError:        ps.LastError,
+			Mode:            ps.Mode,
+			Leader:          ps.Leader,
+			IntervalSeconds: int(ps.Interval.Seconds()),
+			RequestsToday:   ps.RequestsToday,
+			DailyCap:        ps.DailyCap,
+			ViewCells:       ps.ViewCells,
+			SweepCells:      ps.SweepCells,
+			LastError:       ps.LastError,
 		}
 		if !ps.LastPoll.IsZero() {
 			t := ps.LastPoll

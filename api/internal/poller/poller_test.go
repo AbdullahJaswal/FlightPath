@@ -2,6 +2,8 @@ package poller
 
 import (
 	"context"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -9,62 +11,102 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
+	"github.com/AbdullahJaswal/flightpath/api/internal/adsb"
 	"github.com/AbdullahJaswal/flightpath/api/internal/model"
-	"github.com/AbdullahJaswal/flightpath/api/internal/opensky"
 	"github.com/AbdullahJaswal/flightpath/api/internal/snapshot"
 )
 
-func testPoller(credits int) *Poller {
-	return &Poller{
-		cfg:    Config{ActiveInterval: 15 * time.Second, IdleInterval: 15 * time.Minute, DailyCredits: 4000, CreditReserve: 400},
-		client: opensky.New(opensky.Config{ClientID: "id"}),
-		status: Status{CreditsRemaining: credits},
-		last:   map[string]lastPos{},
-		now:    time.Now,
-	}
+func testPoller() *Poller {
+	cfg := Config{RadiusNM: 250, MinInterval: time.Second, ActiveInterval: 10 * time.Second, IdleInterval: 5 * time.Second, MaxCells: 12, DailyRequests: 1000, WorldSweep: true}
+	return New(cfg, nil, snapshot.NewStore(), nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
-func TestPace(t *testing.T) {
-	now := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
+func testRedis(t *testing.T) *redis.Client {
+	t.Helper()
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(mr.Close)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	return rdb
+}
 
-	p := testPoller(4000)
-	d, mode := p.pace(0, now)
-	require.Equal(t, model.ModeIdle, mode)
-	require.Equal(t, 15*time.Minute, d)
+func TestNextPrefersViewportThenSweep(t *testing.T) {
+	p := testPoller()
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	uae := snapshot.Bounds{West: 51, South: 22, East: 60, North: 27}
+	viewCells := p.lattice.Cover(uae, p.cfg.MaxCells)
 
-	// 3600 usable credits buy 900 polls spread over the 12h01m until reset
-	d, mode = p.pace(3, now)
-	require.Equal(t, model.ModeActive, mode)
-	require.Equal(t, 49*time.Second, d)
+	// nothing fetched yet, so a viewport cell comes first
+	c, ok := p.next(now, []snapshot.Bounds{uae})
+	require.True(t, ok)
+	require.Contains(t, keys(viewCells), c.Key)
+	require.Equal(t, len(viewCells), p.Status().ViewCells)
 
-	p = testPoller(1_000_000)
-	d, _ = p.pace(1, now)
-	require.Equal(t, 15*time.Second, d)
+	// with the viewport fresh the sweep gets the spare request
+	for _, vc := range viewCells {
+		p.fetched[vc.Key] = now
+	}
+	c, ok = p.next(now, []snapshot.Bounds{uae})
+	require.True(t, ok)
+	require.Equal(t, p.sweep[0].Key, c.Key)
 
-	p = testPoller(404)
-	d, mode = p.pace(3, now)
-	require.Equal(t, model.ModeActive, mode)
-	require.Equal(t, 15*time.Minute, d)
+	// everything fresh means nothing to do
+	for _, sc := range p.sweep {
+		p.fetched[sc.Key] = now
+	}
+	_, ok = p.next(now, []snapshot.Bounds{uae})
+	require.False(t, ok)
 
-	p = testPoller(400)
-	_, mode = p.pace(3, now)
-	require.Equal(t, model.ModeIdle, mode)
+	// once the active interval passes the viewport is due again, oldest first
+	later := now.Add(11 * time.Second)
+	p.fetched[viewCells[0].Key] = now.Add(-time.Minute)
+	c, ok = p.next(later, []snapshot.Bounds{uae})
+	require.True(t, ok)
+	require.Equal(t, viewCells[0].Key, c.Key)
 
-	p = testPoller(3)
-	d, mode = p.pace(3, now)
-	require.Equal(t, model.ModePaused, mode)
-	require.Equal(t, untilReset(now), d)
+	// a cell that just failed waits its turn
+	p.retryAt[viewCells[0].Key] = later.Add(time.Minute)
+	c, ok = p.next(later, []snapshot.Bounds{uae})
+	require.True(t, ok)
+	require.NotEqual(t, viewCells[0].Key, c.Key)
+}
 
-	// anonymous access keeps a tenth of its 400 credits back, so 360 buy 90 polls until reset
-	p = testPoller(400)
-	p.client = opensky.New(opensky.Config{})
-	d, mode = p.pace(3, now)
-	require.Equal(t, model.ModeActive, mode)
-	require.Equal(t, 481*time.Second, d)
+func TestNextWithoutSweep(t *testing.T) {
+	p := testPoller()
+	p.sweep = nil
+	_, ok := p.next(time.Now(), nil)
+	require.False(t, ok)
+}
+
+func TestMergeKeepsNewestAndEvicts(t *testing.T) {
+	p := testPoller()
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	fresh := model.Aircraft{ICAO24: "abc123", Lat: 1, Lon: 1, PositionAt: now, LastContact: now}
+	older := fresh
+	older.Lat = 2
+	older.PositionAt = now.Add(-5 * time.Second)
+	older.LastContact = older.PositionAt
+	other := model.Aircraft{ICAO24: "def456", Lat: 3, Lon: 3, PositionAt: now.Add(-time.Minute), LastContact: now.Add(-time.Minute)}
+
+	snap := p.merge(&adsb.Batch{Time: now, Aircraft: []model.Aircraft{fresh, other}}, now)
+	require.Equal(t, 2, snap.Len())
+
+	// an overlapping circle reporting an older position does not win
+	snap = p.merge(&adsb.Batch{Time: now, Aircraft: []model.Aircraft{older}}, now.Add(time.Second))
+	a, ok := snap.Get("abc123")
+	require.True(t, ok)
+	require.Equal(t, 1.0, a.Lat)
+
+	// aircraft nobody has reported for keepFor drop out
+	snap = p.merge(&adsb.Batch{Time: now}, now.Add(keepFor).Add(-30*time.Second))
+	require.Equal(t, 1, snap.Len())
+	_, ok = snap.Get("def456")
+	require.False(t, ok)
 }
 
 func TestDownsample(t *testing.T) {
-	p := testPoller(4000)
+	p := testPoller()
 	base := time.Unix(1700000000, 0).UTC()
 	heading, alt := 90.0, 1000.0
 	a := model.Aircraft{ICAO24: "abc123", Lat: 1, Lon: 1, HeadingDeg: &heading, BaroAltM: &alt, PositionAt: base}
@@ -87,51 +129,54 @@ func TestDownsample(t *testing.T) {
 	require.Empty(t, p.downsample([]model.Aircraft{ground}, ground.PositionAt))
 }
 
-func TestFreshSnapshotDelaysPoll(t *testing.T) {
-	p := testPoller(4000)
-	p.snaps = snapshot.NewStore()
-	now := time.Now()
-	p.now = func() time.Time { return now }
-	require.Equal(t, time.Duration(0), p.fresh(15*time.Second))
+func TestReportsFromRedis(t *testing.T) {
+	p := testPoller()
+	p.rdb = testRedis(t)
+	ctx := context.Background()
+	require.Equal(t, 0, p.viewers(ctx))
+	require.Empty(t, p.views(ctx))
 
-	p.snaps.Set(snapshot.New(now.Add(-5*time.Second), nil))
-	require.Equal(t, 10*time.Second, p.fresh(15*time.Second))
-
-	p.snaps.Set(snapshot.New(now.Add(-time.Minute), nil))
-	require.Equal(t, time.Duration(0), p.fresh(15*time.Second))
+	require.NoError(t, p.rdb.Set(ctx, "viewers:a", "2", 0).Err())
+	require.NoError(t, p.rdb.Set(ctx, "viewers:b", "1", 0).Err())
+	require.NoError(t, p.rdb.Set(ctx, "views:a", `[{"West":51,"South":22,"East":60,"North":27}]`, 0).Err())
+	require.NoError(t, p.rdb.Set(ctx, "views:b", `not json`, 0).Err())
+	require.Equal(t, 3, p.viewers(ctx))
+	require.Equal(t, []snapshot.Bounds{{West: 51, South: 22, East: 60, North: 27}}, p.views(ctx))
 }
 
-func TestIdleWaitWakesForViewers(t *testing.T) {
-	mr, err := miniredis.Run()
-	require.NoError(t, err)
-	defer mr.Close()
-	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	defer func() { _ = rdb.Close() }()
+func TestRequestCountSurvivesRestart(t *testing.T) {
+	p := testPoller()
+	p.rdb = testRedis(t)
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	p.now = func() time.Time { return now }
+	ctx := context.Background()
 
-	old := wakeCheckEvery
-	wakeCheckEvery = 20 * time.Millisecond
-	defer func() { wakeCheckEvery = old }()
+	p.count(ctx, now)
+	p.count(ctx, now)
+	require.Equal(t, 2, p.Status().RequestsToday)
 
-	p := testPoller(4000)
-	p.rdb = rdb
-	p.status.LastPoll = time.Now().Add(-time.Minute)
+	q := testPoller()
+	q.rdb = p.rdb
+	q.now = p.now
+	q.restoreRequests(ctx)
+	require.Equal(t, 2, q.Status().RequestsToday)
 
-	start := time.Now()
-	require.True(t, p.wait(context.Background(), 200*time.Millisecond, model.ModeIdle))
-	require.GreaterOrEqual(t, time.Since(start), 200*time.Millisecond)
-
-	require.NoError(t, mr.Set("viewers:a", "2"))
-	start = time.Now()
-	require.True(t, p.wait(context.Background(), 10*time.Second, model.ModeIdle))
-	require.Less(t, time.Since(start), 2*time.Second)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	require.False(t, p.wait(ctx, time.Second, model.ModeActive))
+	// the count resets with the UTC date
+	q.now = func() time.Time { return now.Add(24 * time.Hour) }
+	q.rollover()
+	require.Equal(t, 0, q.Status().RequestsToday)
 }
 
 func TestAngleDiff(t *testing.T) {
 	require.Equal(t, 20.0, angleDiff(350, 10))
 	require.Equal(t, 180.0, angleDiff(0, 180))
 	require.Equal(t, 0.0, angleDiff(45, 45))
+}
+
+func keys(cells []Cell) []string {
+	out := make([]string, 0, len(cells))
+	for _, c := range cells {
+		out = append(out, c.Key)
+	}
+	return out
 }

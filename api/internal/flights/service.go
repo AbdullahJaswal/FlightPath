@@ -17,7 +17,6 @@ import (
 	"github.com/AbdullahJaswal/flightpath/api/internal/cache"
 	"github.com/AbdullahJaswal/flightpath/api/internal/errs"
 	"github.com/AbdullahJaswal/flightpath/api/internal/model"
-	"github.com/AbdullahJaswal/flightpath/api/internal/opensky"
 	"github.com/AbdullahJaswal/flightpath/api/internal/planespotters"
 	"github.com/AbdullahJaswal/flightpath/api/internal/snapshot"
 	"github.com/AbdullahJaswal/flightpath/api/internal/store"
@@ -26,7 +25,6 @@ import (
 type Config struct {
 	AviationstackCap int
 	TrailRetention   time.Duration
-	TracksEnabled    bool
 }
 
 type Service struct {
@@ -36,15 +34,14 @@ type Service struct {
 	cache  *cache.Cache
 	adsb   *adsbdb.Client
 	avs    *aviationstack.Client
-	osky   *opensky.Client
 	photos *planespotters.Client
 	log    *slog.Logger
 	now    func() time.Time
 }
 
 // New wires the service. avs and photos may be nil to disable schedule and photo lookups.
-func New(cfg Config, snaps *snapshot.Store, st *store.Store, c *cache.Cache, adsb *adsbdb.Client, avs *aviationstack.Client, osky *opensky.Client, photos *planespotters.Client, log *slog.Logger) *Service {
-	return &Service{cfg: cfg, snaps: snaps, store: st, cache: c, adsb: adsb, avs: avs, osky: osky, photos: photos, log: log, now: time.Now}
+func New(cfg Config, snaps *snapshot.Store, st *store.Store, c *cache.Cache, adsb *adsbdb.Client, avs *aviationstack.Client, photos *planespotters.Client, log *slog.Logger) *Service {
+	return &Service{cfg: cfg, snaps: snaps, store: st, cache: c, adsb: adsb, avs: avs, photos: photos, log: log, now: time.Now}
 }
 
 // Cache key prefixes, shared with the poller and the seed command for invalidation.
@@ -59,7 +56,6 @@ const (
 	PrefixSchedule = "schedule:"
 	PrefixSearch   = "search:"
 	PrefixTrail    = "trail:"
-	PrefixTrack    = "track:"
 )
 
 // smallAirportSpan is the box size in degrees under which small airports are listed too.
@@ -76,7 +72,6 @@ var (
 	ttlRoute        = cache.TTL{L1: 10 * time.Minute, L2: 24 * time.Hour, Negative: 6 * time.Hour}
 	ttlSchedule     = cache.TTL{L1: 10 * time.Minute, L2: 6 * time.Hour, Negative: 6 * time.Hour}
 	ttlTrail        = cache.TTL{L1: 20 * time.Second, L2: 2 * time.Minute}
-	ttlTrack        = cache.TTL{L1: 5 * time.Minute, L2: 5 * time.Minute, Negative: 5 * time.Minute}
 )
 
 func (s *Service) Aircraft(ctx context.Context, icao24 string) (*model.AircraftDetail, error) {
@@ -399,35 +394,6 @@ func (s *Service) trail(ctx context.Context, icao24 string) ([]model.TrailPoint,
 	})
 	if err != nil {
 		return nil, model.TrailNone, err
-	}
-	if len(points) >= 2 || !s.cfg.TracksEnabled || s.osky == nil {
-		if len(points) == 0 {
-			return points, model.TrailNone, nil
-		}
-		return points, model.TrailStored, nil
-	}
-	track, err := cache.GetOrLoad(ctx, s.cache, PrefixTrack+icao24, ttlTrack, func(ctx context.Context) ([]model.TrailPoint, error) {
-		t, err := s.osky.Track(ctx, icao24)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]model.TrailPoint, 0, len(t.Path))
-		for _, w := range t.Path {
-			out = append(out, model.TrailPoint{Time: w.Time, Lat: w.Lat, Lon: w.Lon, BaroAltM: w.BaroAltM, HeadingDeg: w.HeadingDeg, OnGround: w.OnGround})
-		}
-		return out, nil
-	})
-	if err != nil {
-		if errors.Is(err, errs.ErrNotFound) {
-			err = nil
-		}
-		if len(points) == 0 {
-			return points, model.TrailNone, err
-		}
-		return points, model.TrailStored, err
-	}
-	if len(track) > len(points) {
-		return track, model.TrailOpenSky, nil
 	}
 	if len(points) == 0 {
 		return points, model.TrailNone, nil

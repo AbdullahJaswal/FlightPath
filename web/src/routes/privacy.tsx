@@ -46,14 +46,14 @@ function Privacy() {
       <PageSection icon={IconWorld} title="Third parties">
         <p>
           Your browser only talks to this site. Requests to the data providers,
-          The OpenSky Network, adsbdb, aviationstack and Planespotters.net, are
-          made by the server and do not include anything about you. The
-          exceptions are images: with a tile map style your browser loads tiles
-          directly from Esri or NASA GIBS, the weather layer loads radar tiles
-          from RainViewer, and aircraft photos load from Planespotters.net.
-          Those services see your IP address and, for tiles, the areas you look
-          at. If you use the locate button, your position is read by your
-          browser to move the map and is not sent to the server.
+          adsb.fi, adsbdb, aviationstack and Planespotters.net, are made by the
+          server and do not include anything about you. The exceptions are
+          images: with a tile map style your browser loads tiles directly from
+          Esri or NASA GIBS, the weather layer loads radar tiles from
+          RainViewer, and aircraft photos load from Planespotters.net. Those
+          services see your IP address and, for tiles, the areas you look at. If
+          you use the locate button, your position is read by your browser to
+          move the map and is not sent to the server.
         </p>
       </PageSection>
     </PageShell>

@@ -92,6 +92,22 @@ func (h *Hub) Viewers() int {
 	return len(h.clients)
 }
 
+// Views returns the viewport of every connected client that has sent one.
+func (h *Hub) Views() []snapshot.Bounds {
+	h.mu.Lock()
+	clients := slices.Collect(maps.Keys(h.clients))
+	h.mu.Unlock()
+	views := make([]snapshot.Bounds, 0, len(clients))
+	for _, cl := range clients {
+		cl.mu.Lock()
+		if cl.hasView {
+			views = append(views, cl.view)
+		}
+		cl.mu.Unlock()
+	}
+	return views
+}
+
 // Run broadcasts new snapshots and reports the viewer count until ctx is cancelled.
 func (h *Hub) Run(ctx context.Context) error {
 	ch, unsubscribe := h.snaps.Subscribe()
@@ -109,7 +125,7 @@ func (h *Hub) Run(ctx context.Context) error {
 			h.closeAll()
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
-			_ = h.rdb.Del(shutdownCtx, h.reportKey()).Err()
+			_ = h.rdb.Del(shutdownCtx, h.reportKey(), h.viewsKey()).Err()
 			return nil
 		}
 	}
@@ -225,9 +241,20 @@ func (h *Hub) closeAll() {
 
 func (h *Hub) reportKey() string { return "viewers:" + h.cfg.InstanceID }
 
+func (h *Hub) viewsKey() string { return "views:" + h.cfg.InstanceID }
+
+// report publishes the viewer count and their viewports so the poller, which may run on another
+// instance, knows how many people are watching and where.
 func (h *Hub) report(ctx context.Context) {
 	if err := h.rdb.Set(ctx, h.reportKey(), strconv.Itoa(h.Viewers()), reportTTL).Err(); err != nil {
 		h.log.Debug("viewer report failed", "err", err)
+	}
+	b, err := json.Marshal(h.Views())
+	if err != nil {
+		return
+	}
+	if err := h.rdb.Set(ctx, h.viewsKey(), b, reportTTL).Err(); err != nil {
+		h.log.Debug("views report failed", "err", err)
 	}
 }
 

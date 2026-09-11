@@ -1,0 +1,15 @@
+{
+  "ac": [
+    {"hex": "a98ac6", "type": "adsb_icao", "flight": "UNIDENT ", "r": "N7139A", "t": "C172", "alt_baro": 14000, "alt_geom": 14800, "gs": 118.1, "track": 134.66, "baro_rate": -640, "squawk": "4677", "emergency": "none", "category": "A1", "lat": 25.751208, "lon": 51.099174, "seen": 0.1, "seen_pos": 0.1, "messages": 100, "rssi": -10.5},
+    {"hex": "896420", "type": "adsb_icao", "flight": "UAE12   ", "alt_baro": "ground", "gs": 12.3, "track": 270, "squawk": "2000", "category": "A5", "lat": 25.2528, "lon": 55.3644, "seen": 0.5, "seen_pos": 0.5},
+    {"hex": "4B1805", "type": "mlat", "flight": "SWR1234", "alt_baro": 38000, "gs": 450, "track": 90, "geom_rate": 1200, "category": "A3", "lat": 47.5, "lon": 8.5, "seen": 1.2, "seen_pos": 1.5, "mlat": ["lat", "lon", "track", "speed"]},
+    {"hex": "~2a1b3c", "type": "tisb_trackfile", "alt_baro": 3000, "lat": 40.1, "lon": -74.2, "seen": 2, "seen_pos": 2},
+    {"hex": "abcdef", "type": "adsb_icao", "flight": "NOPOS", "alt_baro": 30000, "seen": 3},
+    {"hex": "123456", "type": "adsb_icao", "flight": "OLD", "alt_baro": 30000, "lat": 10, "lon": 10, "seen": 90, "seen_pos": 120}
+  ],
+  "msg": "No error",
+  "now": 1757632470123,
+  "total": 6,
+  "ctime": 1757632470100,
+  "ptime": 12
+}

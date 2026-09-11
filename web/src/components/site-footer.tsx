@@ -43,13 +43,13 @@ export function SiteFooter({
         Privacy
       </Link>
       <a
-        href="https://opensky-network.org"
+        href="https://adsb.fi"
         target="_blank"
         rel="noreferrer"
         className={linkClass}
       >
         <IconSatellite />
-        OpenSky Network
+        Data by adsb.fi
       </a>
       {weather && (
         <a
