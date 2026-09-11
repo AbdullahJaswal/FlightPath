@@ -5,7 +5,7 @@ Live aircraft on a world map with flight, airport and airline details. Positions
 ## Stack
 
 - **api**: Go, Gin, Huma for typed handlers and OpenAPI 3.1, Bun ORM, PostgreSQL with PostGIS, Redis, WebSocket streaming
-- **web**: TanStack Start, React, shadcn/ui, TanStack Query, client generated from the OpenAPI document with orval (in progress)
+- **web**: TanStack Start, React, shadcn/ui, TanStack Query, react-simple-maps, API client generated from the OpenAPI document with orval
 - **infra**: Docker Compose for the whole stack
 
 ## Layout
@@ -15,13 +15,17 @@ Live aircraft on a world map with flight, airport and airline details. Positions
 | `api/cmd/api` | HTTP server and OpenSky poller |
 | `api/cmd/seed` | Loads airport, airline and aircraft reference data |
 | `api/internal` | Config, snapshot index, tiered cache, poller, upstream clients, store, API operations, live hub |
-| `infra` | Compose file for the API, PostgreSQL and Redis |
-| `.github/workflows` | Lint, tests and image build |
+| `web/src/routes` | Pages and the `/bff` server route |
+| `web/src/lib/api` | Generated API client and zod schemas |
+| `web/src/components` | Map and shadcn/ui components |
+| `infra` | Compose file for the web app, API, PostgreSQL and Redis |
+| `.github/workflows` | Lint, tests, client drift check and image builds |
 
 ## How it works
 
 - One poller instance fetches global positions from OpenSky on a credit-aware schedule and shares each snapshot with every instance through Redis.
 - Browsers open a WebSocket, send their viewport and receive the aircraft inside it after every poll.
+- The browser only talks to the web app. Its `/bff` route forwards API calls with cache headers and ETags intact, and the live stream is proxied to the API WebSocket.
 - An in-process cache in front of Redis serves metadata. Invalidations fan out to all instances and expirations are bounded so nothing outlives its source.
 - Routes and schedules are fetched on demand and counted against the upstream budgets.
 
@@ -33,11 +37,14 @@ docker compose -f infra/docker-compose.yml up -d --build
 docker compose -f infra/docker-compose.yml run --rm --entrypoint /seed api
 ```
 
-API reference at `http://localhost:8080/api/v1/docs`, OpenAPI document at `http://localhost:8080/api/v1/openapi.json`. Settings are listed in `.env.example`.
+Web app at `http://localhost:3000`. API reference at `http://localhost:8080/api/v1/docs`, OpenAPI document at `http://localhost:8080/api/v1/openapi.json`. Settings are listed in `.env.example`.
 
 ```sh
 cd api && go test ./...
+cd web && pnpm api && pnpm lint && pnpm typecheck
 ```
+
+`pnpm api` regenerates the client from the running API.
 
 ## Data sources
 

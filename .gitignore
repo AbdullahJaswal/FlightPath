@@ -10,10 +10,8 @@ api/coverage.out
 
 # node
 node_modules/
-web/.output/
 web/dist/
 web/.tanstack/
-web/.nitro/
 
 # editors and os
 .idea/

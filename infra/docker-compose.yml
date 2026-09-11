@@ -1,6 +1,28 @@
 name: flightpath
 
 services:
+  web:
+    build:
+      context: ../web
+    environment:
+      API_URL: http://api:8080/api/v1
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    develop:
+      watch:
+        - action: sync
+          path: ../web
+          target: /app
+          ignore:
+            - node_modules/
+        - action: rebuild
+          path: ../web/package.json
+        - action: rebuild
+          path: ../web/pnpm-lock.yaml
+
   api:
     build:
       context: ../api
