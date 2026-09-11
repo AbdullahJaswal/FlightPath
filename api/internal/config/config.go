@@ -20,8 +20,9 @@ type Config struct {
 	DatabaseURL string `env:"DATABASE_URL,required"`
 	RedisURL    string `env:"REDIS_URL,required"`
 
-	PollerEnabled  bool          `env:"POLLER_ENABLED" envDefault:"true"`
-	TrailRetention time.Duration `env:"TRAIL_RETENTION" envDefault:"6h"`
+	PollerEnabled      bool          `env:"POLLER_ENABLED" envDefault:"true"`
+	TrailRetention     time.Duration `env:"TRAIL_RETENTION" envDefault:"6h"`
+	SnapshotStaleAfter time.Duration `env:"SNAPSHOT_STALE_AFTER" envDefault:"3m"`
 
 	OpenSky       OpenSky       `envPrefix:"OPENSKY_"`
 	Aviationstack Aviationstack `envPrefix:"AVIATIONSTACK_"`

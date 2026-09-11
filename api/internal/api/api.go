@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -17,11 +18,21 @@ import (
 
 // Deps are the services behind the operations.
 type Deps struct {
-	Flights *flights.Service
-	Snaps   *snapshot.Store
-	Stats   func(context.Context) (*model.Stats, error)
-	Log     *slog.Logger
+	Flights    *flights.Service
+	Snaps      *snapshot.Store
+	Stats      func(context.Context) (*model.Stats, error)
+	StaleAfter time.Duration
+	Log        *slog.Logger
 }
+
+// Cache-Control per kind of data. Live data is always revalidated, which the ETag middleware makes cheap.
+const (
+	ccLive      = "private, no-cache"
+	ccFlight    = "private, max-age=30, stale-while-revalidate=30"
+	ccSchedule  = "private, max-age=300"
+	ccReference = "public, max-age=3600"
+	ccNoStore   = "no-store"
+)
 
 // Register adds every operation to the API.
 func Register(h huma.API, d Deps) {
@@ -100,21 +111,21 @@ type listAircraftInput struct {
 }
 
 type listAircraftOutput struct {
-	Body model.AircraftList
+	CacheControl string `header:"Cache-Control"`
+	Body         model.AircraftList
 }
 
 func (d Deps) listAircraft(_ context.Context, in *listAircraftInput) (*listAircraftOutput, error) {
 	if in.South > in.North {
 		return nil, huma.Error422UnprocessableEntity("south must not exceed north")
 	}
-	out := &listAircraftOutput{Body: model.AircraftList{Aircraft: []model.Aircraft{}}}
+	out := &listAircraftOutput{CacheControl: ccLive, Body: model.AircraftList{Stale: true, Aircraft: []model.Aircraft{}}}
 	snap := d.Snaps.Current()
 	if snap == nil {
 		return out, nil
 	}
 	b := snapshot.Bounds{West: in.West, South: in.South, East: in.East, North: in.North}
-	aircraft, total := snap.Query(b, in.Limit)
-	out.Body = model.AircraftList{Time: snap.Time, Total: total, Count: len(aircraft), Aircraft: aircraft}
+	out.Body = snap.List(b, in.Limit, time.Now(), d.StaleAfter)
 	return out, nil
 }
 
@@ -123,7 +134,8 @@ type icao24Input struct {
 }
 
 type aircraftOutput struct {
-	Body *model.AircraftDetail
+	CacheControl string `header:"Cache-Control"`
+	Body         *model.AircraftDetail
 }
 
 func (d Deps) getAircraft(ctx context.Context, in *icao24Input) (*aircraftOutput, error) {
@@ -131,7 +143,7 @@ func (d Deps) getAircraft(ctx context.Context, in *icao24Input) (*aircraftOutput
 	if err != nil {
 		return nil, d.fail(err)
 	}
-	return &aircraftOutput{Body: detail}, nil
+	return &aircraftOutput{CacheControl: ccLive, Body: detail}, nil
 }
 
 type callsignInput struct {
@@ -139,7 +151,8 @@ type callsignInput struct {
 }
 
 type flightOutput struct {
-	Body *model.FlightDetail
+	CacheControl string `header:"Cache-Control"`
+	Body         *model.FlightDetail
 }
 
 func (d Deps) getFlight(ctx context.Context, in *callsignInput) (*flightOutput, error) {
@@ -147,11 +160,12 @@ func (d Deps) getFlight(ctx context.Context, in *callsignInput) (*flightOutput, 
 	if err != nil {
 		return nil, d.fail(err)
 	}
-	return &flightOutput{Body: f}, nil
+	return &flightOutput{CacheControl: ccFlight, Body: f}, nil
 }
 
 type scheduleOutput struct {
-	Body *model.Schedule
+	CacheControl string `header:"Cache-Control"`
+	Body         *model.Schedule
 }
 
 func (d Deps) getFlightSchedule(ctx context.Context, in *callsignInput) (*scheduleOutput, error) {
@@ -159,7 +173,7 @@ func (d Deps) getFlightSchedule(ctx context.Context, in *callsignInput) (*schedu
 	if err != nil {
 		return nil, d.fail(err)
 	}
-	return &scheduleOutput{Body: s}, nil
+	return &scheduleOutput{CacheControl: ccSchedule, Body: s}, nil
 }
 
 type airportInput struct {
@@ -167,7 +181,8 @@ type airportInput struct {
 }
 
 type airportOutput struct {
-	Body *model.Airport
+	CacheControl string `header:"Cache-Control"`
+	Body         *model.Airport
 }
 
 func (d Deps) getAirport(ctx context.Context, in *airportInput) (*airportOutput, error) {
@@ -175,7 +190,7 @@ func (d Deps) getAirport(ctx context.Context, in *airportInput) (*airportOutput,
 	if err != nil {
 		return nil, d.fail(err)
 	}
-	return &airportOutput{Body: a}, nil
+	return &airportOutput{CacheControl: ccReference, Body: a}, nil
 }
 
 type searchInput struct {
@@ -183,7 +198,8 @@ type searchInput struct {
 }
 
 type searchOutput struct {
-	Body *model.SearchResult
+	CacheControl string `header:"Cache-Control"`
+	Body         *model.SearchResult
 }
 
 func (d Deps) search(ctx context.Context, in *searchInput) (*searchOutput, error) {
@@ -191,11 +207,12 @@ func (d Deps) search(ctx context.Context, in *searchInput) (*searchOutput, error
 	if err != nil {
 		return nil, d.fail(err)
 	}
-	return &searchOutput{Body: r}, nil
+	return &searchOutput{CacheControl: ccLive, Body: r}, nil
 }
 
 type statsOutput struct {
-	Body *model.Stats
+	CacheControl string `header:"Cache-Control"`
+	Body         *model.Stats
 }
 
 func (d Deps) getStats(ctx context.Context, _ *struct{}) (*statsOutput, error) {
@@ -203,7 +220,7 @@ func (d Deps) getStats(ctx context.Context, _ *struct{}) (*statsOutput, error) {
 	if err != nil {
 		return nil, d.fail(err)
 	}
-	return &statsOutput{Body: s}, nil
+	return &statsOutput{CacheControl: ccNoStore, Body: s}, nil
 }
 
 func (d Deps) fail(err error) error {

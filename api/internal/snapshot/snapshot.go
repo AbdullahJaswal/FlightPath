@@ -123,6 +123,28 @@ func (s *Snapshot) Query(b Bounds, limit int) ([]model.Aircraft, int) {
 	return out, total
 }
 
+// Age is how old the snapshot is at the given time.
+func (s *Snapshot) Age(now time.Time) time.Duration {
+	if age := now.Sub(s.Time); age > 0 {
+		return age
+	}
+	return 0
+}
+
+// List builds a response for a bounding box, including freshness information.
+func (s *Snapshot) List(b Bounds, limit int, now time.Time, staleAfter time.Duration) model.AircraftList {
+	aircraft, total := s.Query(b, limit)
+	age := s.Age(now)
+	return model.AircraftList{
+		Time:       s.Time,
+		AgeSeconds: int(age.Seconds()),
+		Stale:      staleAfter > 0 && age > staleAfter,
+		Total:      total,
+		Count:      len(aircraft),
+		Aircraft:   aircraft,
+	}
+}
+
 // Search returns airborne aircraft whose callsign or address starts with prefix.
 func (s *Snapshot) Search(prefix string, limit int) []model.Aircraft {
 	prefix = strings.ToUpper(prefix)

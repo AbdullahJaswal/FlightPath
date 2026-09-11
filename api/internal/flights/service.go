@@ -43,7 +43,20 @@ func New(cfg Config, snaps *snapshot.Store, st *store.Store, c *cache.Cache, ads
 	return &Service{cfg: cfg, snaps: snaps, store: st, cache: c, adsb: adsb, avs: avs, osky: osky, log: log, now: time.Now}
 }
 
+// Cache key prefixes, shared with the poller and the seed command for invalidation.
+const (
+	PrefixAircraft = "aircraft:"
+	PrefixAirport  = "airport:"
+	PrefixAirline  = "airline:"
+	PrefixRoute    = "route:"
+	PrefixSchedule = "schedule:"
+	PrefixSearch   = "search:"
+	PrefixTrail    = "trail:"
+	PrefixTrack    = "track:"
+)
+
 var (
+	ttlSearch       = cache.TTL{L1: time.Minute}
 	ttlAircraftInfo = cache.TTL{L1: time.Hour, L2: 24 * time.Hour, Negative: 5 * time.Minute}
 	ttlAirport      = cache.TTL{L1: time.Hour, L2: 24 * time.Hour, Negative: 5 * time.Minute}
 	ttlAirline      = cache.TTL{L1: time.Hour, L2: 24 * time.Hour, Negative: 5 * time.Minute}
@@ -117,41 +130,42 @@ func (s *Service) Schedule(ctx context.Context, callsign string) (*model.Schedul
 		return nil, errs.ErrDisabled
 	}
 	cs := normalize(callsign)
-	return cache.GetOrLoad(ctx, s.cache, "schedule:"+cs, ttlSchedule, func(ctx context.Context) (*model.Schedule, error) {
+	return cache.GetOrLoadFor(ctx, s.cache, PrefixSchedule+cs, ttlSchedule, func(ctx context.Context) (*model.Schedule, time.Duration, error) {
 		now := s.now()
 		if m, err := s.store.FlightMeta(ctx, cs, string(model.MetaAviationstack)); err == nil && m.ExpiresAt.After(now) {
 			if !m.Found {
-				return nil, errs.ErrNotFound
+				return nil, 0, errs.ErrNotFound
 			}
 			var sch model.Schedule
 			if err := json.Unmarshal(m.Payload, &sch); err == nil {
-				return &sch, nil
+				return &sch, m.ExpiresAt.Sub(now), nil
 			}
 		}
 		period := now.UTC().Format("2006-01")
 		used, ok, err := s.store.TryConsume(ctx, string(model.MetaAviationstack), period, s.cfg.AviationstackCap)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if !ok {
-			return nil, fmt.Errorf("%w: aviationstack %d/%d used in %s", errs.ErrQuotaExceeded, used, s.cfg.AviationstackCap, period)
+			return nil, 0, fmt.Errorf("%w: aviationstack %d/%d used in %s", errs.ErrQuotaExceeded, used, s.cfg.AviationstackCap, period)
 		}
 		f, err := s.avs.FlightByICAO(ctx, cs)
 		if errors.Is(err, errs.ErrNotFound) {
 			s.persist(ctx, cs, model.MetaAviationstack, false, nil, now.Add(6*time.Hour))
-			return nil, err
+			return nil, 0, err
 		}
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		sch := toSchedule(cs, f, now)
-		s.persist(ctx, cs, model.MetaAviationstack, true, sch, scheduleExpiry(sch, now))
-		return sch, nil
+		expires := scheduleExpiry(sch, now)
+		s.persist(ctx, cs, model.MetaAviationstack, true, sch, expires)
+		return sch, expires.Sub(now), nil
 	})
 }
 
 func (s *Service) Airport(ctx context.Context, code string) (*model.Airport, error) {
-	return cache.GetOrLoad(ctx, s.cache, "airport:"+strings.ToUpper(strings.TrimSpace(code)), ttlAirport, func(ctx context.Context) (*model.Airport, error) {
+	return cache.GetOrLoad(ctx, s.cache, PrefixAirport+strings.ToUpper(strings.TrimSpace(code)), ttlAirport, func(ctx context.Context) (*model.Airport, error) {
 		a, err := s.store.AirportByCode(ctx, code)
 		if err != nil {
 			return nil, err
@@ -160,35 +174,55 @@ func (s *Service) Airport(ctx context.Context, code string) (*model.Airport, err
 	})
 }
 
+type searchRecord struct {
+	Airports []model.Airport `json:"airports"`
+	Airlines []model.Airline `json:"airlines"`
+	ICAO24   string          `json:"icao24,omitempty"`
+}
+
 func (s *Service) Search(ctx context.Context, q string) (*model.SearchResult, error) {
 	q = strings.TrimSpace(q)
 	out := &model.SearchResult{Aircraft: []model.Aircraft{}, Airports: []model.Airport{}, Airlines: []model.Airline{}}
-	snap := s.snaps.Current()
-	if snap != nil {
-		if hits := snap.Search(q, 10); len(hits) > 0 {
-			out.Aircraft = hits
+	rec, err := cache.GetOrLoad(ctx, s.cache, PrefixSearch+strings.ToLower(q), ttlSearch, func(ctx context.Context) (*searchRecord, error) {
+		rec := &searchRecord{Airports: []model.Airport{}, Airlines: []model.Airline{}}
+		airports, err := s.store.SearchAirports(ctx, q, 8)
+		if err != nil {
+			return nil, err
 		}
-		if len(out.Aircraft) == 0 {
-			if ac, err := s.store.AircraftByRegistration(ctx, q); err == nil {
-				if a, ok := snap.Get(ac.ICAO24); ok {
-					out.Aircraft = []model.Aircraft{a}
-				}
+		for i := range airports {
+			rec.Airports = append(rec.Airports, *toAirport(&airports[i]))
+		}
+		airlines, err := s.store.SearchAirlines(ctx, q, 5)
+		if err != nil {
+			return nil, err
+		}
+		for i := range airlines {
+			rec.Airlines = append(rec.Airlines, *toAirline(&airlines[i]))
+		}
+		if ac, err := s.store.AircraftByRegistration(ctx, q); err == nil {
+			rec.ICAO24 = ac.ICAO24
+		}
+		return rec, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(rec.Airports) > 0 {
+		out.Airports = rec.Airports
+	}
+	if len(rec.Airlines) > 0 {
+		out.Airlines = rec.Airlines
+	}
+	if snap := s.snaps.Current(); snap != nil {
+		hits := snap.Search(q, 10)
+		if len(hits) == 0 && rec.ICAO24 != "" {
+			if a, ok := snap.Get(rec.ICAO24); ok {
+				hits = []model.Aircraft{a}
 			}
 		}
-	}
-	airports, err := s.store.SearchAirports(ctx, q, 8)
-	if err != nil {
-		return nil, err
-	}
-	for i := range airports {
-		out.Airports = append(out.Airports, *toAirport(&airports[i]))
-	}
-	airlines, err := s.store.SearchAirlines(ctx, q, 5)
-	if err != nil {
-		return nil, err
-	}
-	for i := range airlines {
-		out.Airlines = append(out.Airlines, *toAirline(&airlines[i]))
+		if len(hits) > 0 {
+			out.Aircraft = hits
+		}
 	}
 	return out, nil
 }
@@ -199,31 +233,32 @@ type routeRecord struct {
 }
 
 func (s *Service) route(ctx context.Context, cs string) (*routeRecord, error) {
-	return cache.GetOrLoad(ctx, s.cache, "route:"+cs, ttlRoute, func(ctx context.Context) (*routeRecord, error) {
+	return cache.GetOrLoadFor(ctx, s.cache, PrefixRoute+cs, ttlRoute, func(ctx context.Context) (*routeRecord, time.Duration, error) {
 		now := s.now()
 		if m, err := s.store.FlightMeta(ctx, cs, string(model.MetaADSBDB)); err == nil && m.ExpiresAt.After(now) {
 			if !m.Found {
-				return nil, errs.ErrNotFound
+				return nil, 0, errs.ErrNotFound
 			}
 			var rec routeRecord
 			if err := json.Unmarshal(m.Payload, &rec); err == nil {
-				return &rec, nil
+				return &rec, m.ExpiresAt.Sub(now), nil
 			}
 		}
 		r, err := s.adsb.Route(ctx, cs)
 		if errors.Is(err, errs.ErrNotFound) {
 			s.persist(ctx, cs, model.MetaADSBDB, false, nil, now.Add(6*time.Hour))
-			return nil, err
+			return nil, 0, err
 		}
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		rec := &routeRecord{Route: &model.Route{Origin: fromADSBAirport(r.Origin), Destination: fromADSBAirport(r.Destination), Source: model.MetaADSBDB}}
 		if r.Airline != nil {
 			rec.Airline = &model.Airline{ICAO: r.Airline.ICAO, IATA: r.Airline.IATA, Name: r.Airline.Name, Callsign: r.Airline.Callsign, Country: r.Airline.Country}
 		}
-		s.persist(ctx, cs, model.MetaADSBDB, true, rec, now.Add(7*24*time.Hour))
-		return rec, nil
+		expires := now.Add(7 * 24 * time.Hour)
+		s.persist(ctx, cs, model.MetaADSBDB, true, rec, expires)
+		return rec, expires.Sub(now), nil
 	})
 }
 
@@ -242,7 +277,7 @@ func (s *Service) persist(ctx context.Context, cs string, source model.MetaSourc
 }
 
 func (s *Service) aircraftInfo(ctx context.Context, icao24 string) (*model.AircraftInfo, error) {
-	return cache.GetOrLoad(ctx, s.cache, "aircraft:"+icao24, ttlAircraftInfo, func(ctx context.Context) (*model.AircraftInfo, error) {
+	return cache.GetOrLoad(ctx, s.cache, PrefixAircraft+icao24, ttlAircraftInfo, func(ctx context.Context) (*model.AircraftInfo, error) {
 		a, err := s.store.AircraftByICAO24(ctx, icao24)
 		if err != nil {
 			return nil, err
@@ -255,7 +290,7 @@ func (s *Service) aircraftInfo(ctx context.Context, icao24 string) (*model.Aircr
 }
 
 func (s *Service) airline(ctx context.Context, icao string) (*model.Airline, error) {
-	return cache.GetOrLoad(ctx, s.cache, "airline:"+icao, ttlAirline, func(ctx context.Context) (*model.Airline, error) {
+	return cache.GetOrLoad(ctx, s.cache, PrefixAirline+icao, ttlAirline, func(ctx context.Context) (*model.Airline, error) {
 		a, err := s.store.AirlineByICAO(ctx, icao)
 		if err != nil {
 			return nil, err
@@ -265,7 +300,7 @@ func (s *Service) airline(ctx context.Context, icao string) (*model.Airline, err
 }
 
 func (s *Service) trail(ctx context.Context, icao24 string) ([]model.TrailPoint, model.TrailSource, error) {
-	points, err := cache.GetOrLoad(ctx, s.cache, "trail:"+icao24, ttlTrail, func(ctx context.Context) ([]model.TrailPoint, error) {
+	points, err := cache.GetOrLoad(ctx, s.cache, PrefixTrail+icao24, ttlTrail, func(ctx context.Context) ([]model.TrailPoint, error) {
 		rows, err := s.store.Trail(ctx, icao24, s.now().Add(-s.cfg.TrailRetention))
 		if err != nil {
 			return nil, err
@@ -285,7 +320,7 @@ func (s *Service) trail(ctx context.Context, icao24 string) ([]model.TrailPoint,
 		}
 		return points, model.TrailStored, nil
 	}
-	track, err := cache.GetOrLoad(ctx, s.cache, "track:"+icao24, ttlTrack, func(ctx context.Context) ([]model.TrailPoint, error) {
+	track, err := cache.GetOrLoad(ctx, s.cache, PrefixTrack+icao24, ttlTrack, func(ctx context.Context) ([]model.TrailPoint, error) {
 		t, err := s.osky.Track(ctx, icao24)
 		if err != nil {
 			return nil, err

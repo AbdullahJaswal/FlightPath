@@ -50,7 +50,7 @@ func New(cfg config.Config, version string, deps api.Deps, hub *live.Hub, ready 
 	})
 
 	g := e.Group(basePath)
-	g.Use(rateLimit(cfg.RateLimitRPS, cfg.RateLimitBurst))
+	g.Use(rateLimit(cfg.RateLimitRPS, cfg.RateLimitBurst), etag())
 	h := humagin.NewWithGroup(e, g, openAPIConfig(version))
 	api.Register(h, deps)
 	g.GET("/live", hub.Handler())

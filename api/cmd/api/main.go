@@ -115,6 +115,7 @@ func run() error {
 		InstanceID:     instance,
 		OriginPatterns: originHosts(cfg.CORSOrigins),
 		MaxConnections: cfg.WSMaxConnections,
+		StaleAfter:     cfg.SnapshotStaleAfter,
 		PollInterval: func() time.Duration {
 			if pl == nil {
 				return 0
@@ -124,11 +125,12 @@ func run() error {
 	}, snaps, rdb, log)
 
 	deps := api.Deps{
-		Flights: svc,
-		Snaps:   snaps,
-		Log:     log,
+		Flights:    svc,
+		Snaps:      snaps,
+		StaleAfter: cfg.SnapshotStaleAfter,
+		Log:        log,
 		Stats: func(ctx context.Context) (*model.Stats, error) {
-			return stats(ctx, snaps, pl, hub, st, avs != nil, cfg.Aviationstack.MonthlyCap)
+			return stats(ctx, snaps, pl, hub, st, c, cfg, avs != nil)
 		},
 	}
 	ready := func(ctx context.Context) error {
@@ -145,6 +147,7 @@ func run() error {
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return hub.Run(gctx) })
 	g.Go(func() error { return syncer.Run(gctx) })
+	g.Go(func() error { return c.Run(gctx) })
 	if pl != nil {
 		g.Go(func() error { return pl.Run(gctx) })
 	}
@@ -152,13 +155,18 @@ func run() error {
 	return g.Wait()
 }
 
-func stats(ctx context.Context, snaps *snapshot.Store, pl *poller.Poller, hub *live.Hub, st *store.Store, avsEnabled bool, avsCap int) (*model.Stats, error) {
-	s := &model.Stats{Version: version, Viewers: hub.Viewers()}
+func stats(ctx context.Context, snaps *snapshot.Store, pl *poller.Poller, hub *live.Hub, st *store.Store, c *cache.Cache, cfg config.Config, avsEnabled bool) (*model.Stats, error) {
+	s := &model.Stats{Version: version, Viewers: hub.Viewers(), Stale: true}
 	if snap := snaps.Current(); snap != nil {
 		t := snap.Time
+		age := snap.Age(time.Now())
 		s.SnapshotTime = &t
+		s.SnapshotAgeSeconds = int(age.Seconds())
+		s.Stale = age > cfg.SnapshotStaleAfter
 		s.AircraftCount = snap.Len()
 	}
+	cs := c.Stats()
+	s.Cache = model.CacheStats{L1Hits: cs.L1Hits, L2Hits: cs.L2Hits, Misses: cs.Misses, L1Entries: cs.L1Entries}
 	s.Poller.Mode = model.ModeDisabled
 	if pl != nil {
 		ps := pl.Status()
@@ -184,7 +192,7 @@ func stats(ctx context.Context, snaps *snapshot.Store, pl *poller.Poller, hub *l
 	if err != nil {
 		return nil, err
 	}
-	s.Aviationstack = model.QuotaStatus{Enabled: avsEnabled, Used: used, Cap: avsCap, Period: period}
+	s.Aviationstack = model.QuotaStatus{Enabled: avsEnabled, Used: used, Cap: cfg.Aviationstack.MonthlyCap, Period: period}
 	return s, nil
 }
 

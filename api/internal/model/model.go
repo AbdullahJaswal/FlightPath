@@ -24,10 +24,12 @@ type Aircraft struct {
 
 // AircraftList is a thinned set of aircraft inside a bounding box.
 type AircraftList struct {
-	Time     time.Time  `json:"time" doc:"Snapshot time."`
-	Total    int        `json:"total" doc:"Aircraft inside the bounds before thinning."`
-	Count    int        `json:"count" doc:"Aircraft returned."`
-	Aircraft []Aircraft `json:"aircraft"`
+	Time       time.Time  `json:"time" doc:"Snapshot time."`
+	AgeSeconds int        `json:"ageSeconds" doc:"Seconds between the snapshot time and the response."`
+	Stale      bool       `json:"stale" doc:"True when the snapshot is older than the freshness limit, for example while the poller is out of credits."`
+	Total      int        `json:"total" doc:"Aircraft inside the bounds before thinning."`
+	Count      int        `json:"count" doc:"Aircraft returned."`
+	Aircraft   []Aircraft `json:"aircraft"`
 }
 
 // AircraftInfo is static aircraft registration data.
@@ -155,12 +157,23 @@ type QuotaStatus struct {
 	Period  string `json:"period" doc:"Month in YYYY-MM." example:"2026-09"`
 }
 
+// CacheStats counts cache lookups per tier since the instance started.
+type CacheStats struct {
+	L1Hits    int64 `json:"l1Hits" doc:"Hits in the in-process tier."`
+	L2Hits    int64 `json:"l2Hits" doc:"Hits in Redis."`
+	Misses    int64 `json:"misses" doc:"Loads from the source."`
+	L1Entries int   `json:"l1Entries" doc:"Entries currently in the in-process tier."`
+}
+
 // Stats is the service status.
 type Stats struct {
-	Version       string       `json:"version" example:"1.0.0"`
-	SnapshotTime  *time.Time   `json:"snapshotTime,omitempty"`
-	AircraftCount int          `json:"aircraftCount"`
-	Viewers       int          `json:"viewers" doc:"Open live connections on this instance."`
-	Poller        PollerStatus `json:"poller"`
-	Aviationstack QuotaStatus  `json:"aviationstack"`
+	Version            string       `json:"version" example:"1.0.0"`
+	SnapshotTime       *time.Time   `json:"snapshotTime,omitempty"`
+	SnapshotAgeSeconds int          `json:"snapshotAgeSeconds"`
+	Stale              bool         `json:"stale" doc:"True when the snapshot is older than the freshness limit."`
+	AircraftCount      int          `json:"aircraftCount"`
+	Viewers            int          `json:"viewers" doc:"Open live connections on this instance."`
+	Poller             PollerStatus `json:"poller"`
+	Aviationstack      QuotaStatus  `json:"aviationstack"`
+	Cache              CacheStats   `json:"cache"`
 }

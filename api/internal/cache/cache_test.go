@@ -18,18 +18,24 @@ import (
 	"github.com/AbdullahJaswal/flightpath/api/internal/errs"
 )
 
-func testCache(t *testing.T) (*Cache, *miniredis.Miniredis) {
+func testRedis(t *testing.T) *miniredis.Miniredis {
 	t.Helper()
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
 	t.Cleanup(mr.Close)
+	return mr
+}
+
+func testCache(t *testing.T, mr *miniredis.Miniredis) *Cache {
+	t.Helper()
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	t.Cleanup(func() { _ = rdb.Close() })
-	return New(rdb, 100, slog.New(slog.NewTextHandler(io.Discard, nil))), mr
+	return New(rdb, 100, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 func TestGetOrLoadTiers(t *testing.T) {
-	c, mr := testCache(t)
+	mr := testRedis(t)
+	c := testCache(t, mr)
 	ctx := context.Background()
 	calls := 0
 	load := func(context.Context) (string, error) {
@@ -54,15 +60,59 @@ func TestGetOrLoadTiers(t *testing.T) {
 	require.Equal(t, 1, calls)
 	require.True(t, mr.Exists("k"))
 
-	c.Delete(ctx, "k")
+	c.Invalidate(ctx, "k")
+	require.False(t, mr.Exists("k"))
 	v, err = GetOrLoad(ctx, c, "k", ttl, load)
 	require.NoError(t, err)
 	require.Equal(t, "v2", v)
 	require.Equal(t, 2, calls)
+
+	s := c.Stats()
+	require.Equal(t, int64(1), s.L1Hits)
+	require.Equal(t, int64(1), s.L2Hits)
+	require.Equal(t, int64(2), s.Misses)
+}
+
+func TestLocalTierNeverOutlivesRedis(t *testing.T) {
+	mr := testRedis(t)
+	c := testCache(t, mr)
+	ctx := context.Background()
+
+	_, err := GetOrLoad(ctx, c, "short", TTL{L1: time.Hour, L2: 2 * time.Second}, func(context.Context) (int, error) { return 1, nil })
+	require.NoError(t, err)
+	e, ok := c.l1.GetIfPresent("short")
+	require.True(t, ok)
+	require.Equal(t, 2*time.Second, e.ttl)
+
+	c.l1.Invalidate("short")
+	mr.SetTTL("short", 500*time.Millisecond)
+	_, err = GetOrLoad(ctx, c, "short", TTL{L1: time.Hour, L2: 2 * time.Second}, func(context.Context) (int, error) { return 2, nil })
+	require.NoError(t, err)
+	e, ok = c.l1.GetIfPresent("short")
+	require.True(t, ok)
+	require.LessOrEqual(t, e.ttl, 500*time.Millisecond)
+}
+
+func TestValueLifetimeBoundsBothTiers(t *testing.T) {
+	mr := testRedis(t)
+	c := testCache(t, mr)
+	ctx := context.Background()
+
+	_, err := GetOrLoadFor(ctx, c, "life", TTL{L1: time.Hour, L2: time.Hour}, func(context.Context) (int, time.Duration, error) { return 1, 10 * time.Second, nil })
+	require.NoError(t, err)
+	e, _ := c.l1.GetIfPresent("life")
+	require.Equal(t, 10*time.Second, e.ttl)
+	require.Equal(t, 10*time.Second, mr.TTL("life"))
+
+	_, err = GetOrLoadFor(ctx, c, "expired", TTL{L1: time.Hour, L2: time.Hour}, func(context.Context) (int, time.Duration, error) { return 1, -1, nil })
+	require.NoError(t, err)
+	_, ok := c.l1.GetIfPresent("expired")
+	require.False(t, ok)
+	require.False(t, mr.Exists("expired"))
 }
 
 func TestNegativeCache(t *testing.T) {
-	c, _ := testCache(t)
+	c := testCache(t, testRedis(t))
 	ctx := context.Background()
 	calls := 0
 	load := func(context.Context) (*string, error) {
@@ -78,8 +128,41 @@ func TestNegativeCache(t *testing.T) {
 	require.Equal(t, 1, calls)
 }
 
+func TestInvalidationFansOutToOtherInstances(t *testing.T) {
+	mr := testRedis(t)
+	a := testCache(t, mr)
+	b := testCache(t, mr)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = b.Run(ctx) }()
+	time.Sleep(50 * time.Millisecond)
+
+	ttl := TTL{L1: time.Hour, L2: time.Hour}
+	for _, key := range []string{"airport:FRA", "airport:LHR", "trail:abc123"} {
+		_, err := GetOrLoad(ctx, b, key, ttl, func(context.Context) (string, error) { return "v", nil })
+		require.NoError(t, err)
+	}
+
+	a.Invalidate(ctx, "trail:abc123")
+	require.Eventually(t, func() bool {
+		_, ok := b.l1.GetIfPresent("trail:abc123")
+		return !ok
+	}, 2*time.Second, 10*time.Millisecond)
+	_, ok := b.l1.GetIfPresent("airport:FRA")
+	require.True(t, ok)
+
+	a.InvalidatePrefix(ctx, "airport:")
+	require.Eventually(t, func() bool {
+		_, fra := b.l1.GetIfPresent("airport:FRA")
+		_, lhr := b.l1.GetIfPresent("airport:LHR")
+		return !fra && !lhr
+	}, 2*time.Second, 10*time.Millisecond)
+	require.False(t, mr.Exists("airport:FRA"))
+	require.False(t, mr.Exists("airport:LHR"))
+}
+
 func TestConcurrentMissesShareOneLoad(t *testing.T) {
-	c, _ := testCache(t)
+	c := testCache(t, testRedis(t))
 	ctx := context.Background()
 	var calls atomic.Int32
 	gate := make(chan struct{})

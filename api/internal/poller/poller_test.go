@@ -1,9 +1,12 @@
 package poller
 
 import (
+	"context"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
 	"github.com/AbdullahJaswal/flightpath/api/internal/model"
@@ -51,6 +54,13 @@ func TestPace(t *testing.T) {
 	d, mode = p.pace(3, now)
 	require.Equal(t, model.ModePaused, mode)
 	require.Equal(t, untilReset(now), d)
+
+	// anonymous access keeps a tenth of its 400 credits back, so 360 buy 90 polls until reset
+	p = testPoller(400)
+	p.client = opensky.New(opensky.Config{})
+	d, mode = p.pace(3, now)
+	require.Equal(t, model.ModeActive, mode)
+	require.Equal(t, 481*time.Second, d)
 }
 
 func TestDownsample(t *testing.T) {
@@ -89,6 +99,35 @@ func TestFreshSnapshotDelaysPoll(t *testing.T) {
 
 	p.snaps.Set(snapshot.New(now.Add(-time.Minute), nil))
 	require.Equal(t, time.Duration(0), p.fresh(15*time.Second))
+}
+
+func TestIdleWaitWakesForViewers(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer func() { _ = rdb.Close() }()
+
+	old := wakeCheckEvery
+	wakeCheckEvery = 20 * time.Millisecond
+	defer func() { wakeCheckEvery = old }()
+
+	p := testPoller(4000)
+	p.rdb = rdb
+	p.status.LastPoll = time.Now().Add(-time.Minute)
+
+	start := time.Now()
+	require.True(t, p.wait(context.Background(), 200*time.Millisecond, model.ModeIdle))
+	require.GreaterOrEqual(t, time.Since(start), 200*time.Millisecond)
+
+	require.NoError(t, mr.Set("viewers:a", "2"))
+	start = time.Now()
+	require.True(t, p.wait(context.Background(), 10*time.Second, model.ModeIdle))
+	require.Less(t, time.Since(start), 2*time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.False(t, p.wait(ctx, time.Second, model.ModeActive))
 }
 
 func TestAngleDiff(t *testing.T) {

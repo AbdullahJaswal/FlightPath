@@ -12,6 +12,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/AbdullahJaswal/flightpath/api/internal/cache"
+	"github.com/AbdullahJaswal/flightpath/api/internal/flights"
 	"github.com/AbdullahJaswal/flightpath/api/internal/model"
 	"github.com/AbdullahJaswal/flightpath/api/internal/opensky"
 	"github.com/AbdullahJaswal/flightpath/api/internal/snapshot"
@@ -26,13 +27,16 @@ const (
 	leaderKey        = "poller:leader"
 	creditsKey       = "opensky:credits"
 	leaderTTL        = 90 * time.Second
-	snapshotTTL      = 10 * time.Minute
 	minStoreGap      = 5 * time.Minute
+	trailBatchLimit  = 500
 	headingDelta     = 10.0
 	altitudeDelta    = 100.0
 	retentionEvery   = 10 * time.Minute
 	staleAfter       = time.Hour
 )
+
+// wakeCheckEvery is how often an idle poller looks for viewers. A variable so tests can shorten it.
+var wakeCheckEvery = 5 * time.Second
 
 type Config struct {
 	InstanceID     string
@@ -80,11 +84,7 @@ type Poller struct {
 }
 
 func New(cfg Config, client *opensky.Client, snaps *snapshot.Store, c *cache.Cache, st *store.Store, rdb *redis.Client, log *slog.Logger) *Poller {
-	credits := cfg.DailyCredits
-	if client.Anonymous() && credits > anonymousCredits {
-		credits = anonymousCredits
-	}
-	return &Poller{
+	p := &Poller{
 		cfg:    cfg,
 		client: client,
 		snaps:  snaps,
@@ -93,9 +93,11 @@ func New(cfg Config, client *opensky.Client, snaps *snapshot.Store, c *cache.Cac
 		rdb:    rdb,
 		log:    log,
 		now:    time.Now,
-		status: Status{Mode: model.ModeIdle, CreditsRemaining: credits},
+		status: Status{Mode: model.ModeIdle},
 		last:   make(map[string]lastPos),
 	}
+	p.status.CreditsRemaining = p.budget()
+	return p
 }
 
 func (p *Poller) Status() Status {
@@ -143,7 +145,7 @@ func (p *Poller) Run(ctx context.Context) error {
 				s.Interval = interval
 				s.NextPoll = p.now().Add(wait)
 			})
-			if !sleep(ctx, wait) {
+			if !p.wait(ctx, wait, mode) {
 				return nil
 			}
 			continue
@@ -190,8 +192,30 @@ func (p *Poller) Run(ctx context.Context) error {
 			s.NextPoll = p.now().Add(interval)
 			s.LastError = ""
 		})
-		if !sleep(ctx, interval) {
+		if !p.wait(ctx, interval, mode) {
 			return nil
+		}
+	}
+}
+
+// wait sleeps until the next poll. While idle it checks for viewers every few seconds and returns
+// early once someone connects, so the map refreshes within seconds instead of a full idle period.
+func (p *Poller) wait(ctx context.Context, d time.Duration, mode model.PollerMode) bool {
+	if mode != model.ModeIdle {
+		return sleep(ctx, d)
+	}
+	deadline := p.now().Add(d)
+	earliest := p.Status().LastPoll.Add(p.cfg.ActiveInterval)
+	for {
+		remaining := deadline.Sub(p.now())
+		if remaining <= 0 {
+			return true
+		}
+		if !sleep(ctx, min(remaining, wakeCheckEvery)) {
+			return false
+		}
+		if p.viewers(ctx) > 0 && !p.now().Before(earliest) {
+			return true
 		}
 	}
 }
@@ -203,7 +227,7 @@ func (p *Poller) pace(viewers int, now time.Time) (time.Duration, model.PollerMo
 	if s.CreditsRemaining < pollCost {
 		return reset, model.ModePaused
 	}
-	usable := s.CreditsRemaining - p.cfg.CreditReserve
+	usable := s.CreditsRemaining - p.reserve()
 	if viewers <= 0 || usable < pollCost {
 		return p.cfg.IdleInterval, model.ModeIdle
 	}
@@ -230,6 +254,19 @@ func (p *Poller) fresh(interval time.Duration) time.Duration {
 	return 0
 }
 
+// budget is the daily credit allowance for the current access mode.
+func (p *Poller) budget() int {
+	if p.client.Anonymous() && p.cfg.DailyCredits > anonymousCredits {
+		return anonymousCredits
+	}
+	return p.cfg.DailyCredits
+}
+
+// reserve keeps credits back for idle polling, at most a tenth of the budget so small budgets still allow active polling.
+func (p *Poller) reserve() int {
+	return min(p.cfg.CreditReserve, p.budget()/10)
+}
+
 // untilReset is the time until the next UTC midnight, when OpenSky credits refresh.
 func untilReset(now time.Time) time.Duration {
 	u := now.UTC()
@@ -247,11 +284,7 @@ func (p *Poller) rollover() {
 	}
 	p.creditsDay = day
 	p.status.CreditsUsedToday = 0
-	credits := p.cfg.DailyCredits
-	if p.client.Anonymous() && credits > anonymousCredits {
-		credits = anonymousCredits
-	}
-	p.status.CreditsRemaining = credits
+	p.status.CreditsRemaining = p.budget()
 }
 
 func (p *Poller) poll(ctx context.Context) error {
@@ -263,7 +296,7 @@ func (p *Poller) poll(ctx context.Context) error {
 	snap := snapshot.New(states.Time, states.Aircraft)
 	p.snaps.Set(snap)
 	if b, err := snapshot.Marshal(snap); err == nil {
-		if err := p.cache.PutRaw(ctx, snapshotKey, b, snapshotTTL); err != nil {
+		if err := p.cache.PutRaw(ctx, snapshotKey, b, p.cfg.IdleInterval+5*time.Minute); err != nil {
 			p.log.Warn("snapshot cache write failed", "err", err)
 		} else if err := p.rdb.Publish(ctx, snapshotChannel, p.cfg.InstanceID).Err(); err != nil {
 			p.log.Warn("snapshot publish failed", "err", err)
@@ -272,6 +305,8 @@ func (p *Poller) poll(ctx context.Context) error {
 	if rows := p.downsample(states.Aircraft, now); len(rows) > 0 {
 		if err := p.store.InsertPositions(ctx, rows); err != nil {
 			p.log.Warn("position insert failed", "err", err, "rows", len(rows))
+		} else {
+			p.invalidateTrails(ctx, rows)
 		}
 	}
 	p.retain(ctx, now)
@@ -342,6 +377,19 @@ func (p *Poller) downsample(aircraft []model.Aircraft, now time.Time) []store.Po
 		}
 	}
 	return rows
+}
+
+// invalidateTrails drops cached trails of aircraft that just gained a stored point.
+func (p *Poller) invalidateTrails(ctx context.Context, rows []store.Position) {
+	if len(rows) > trailBatchLimit {
+		p.cache.InvalidatePrefix(ctx, flights.PrefixTrail)
+		return
+	}
+	keys := make([]string, 0, len(rows))
+	for _, r := range rows {
+		keys = append(keys, flights.PrefixTrail+r.ICAO24)
+	}
+	p.cache.Invalidate(ctx, keys...)
 }
 
 func (p *Poller) retain(ctx context.Context, now time.Time) {

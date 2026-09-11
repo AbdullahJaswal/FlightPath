@@ -34,6 +34,7 @@ type Config struct {
 	InstanceID     string
 	OriginPatterns []string
 	MaxConnections int
+	StaleAfter     time.Duration
 	PollInterval   func() time.Duration
 }
 
@@ -156,7 +157,7 @@ func (h *Hub) serve(ctx context.Context, conn *websocket.Conn) {
 		}
 		cl.setView(m)
 		if snap := h.snaps.Current(); snap != nil {
-			cl.push(encode(snap, cl))
+			cl.push(h.encode(snap, cl))
 		}
 	}
 	_ = conn.Close(websocket.StatusNormalClosure, "")
@@ -197,7 +198,7 @@ func (h *Hub) broadcast(snap *snapshot.Snapshot) {
 		if !cl.viewSet() {
 			continue
 		}
-		cl.push(encode(snap, cl))
+		cl.push(h.encode(snap, cl))
 	}
 }
 
@@ -257,11 +258,10 @@ func (cl *client) viewSet() bool {
 	return cl.hasView
 }
 
-func encode(snap *snapshot.Snapshot, cl *client) []byte {
+func (h *Hub) encode(snap *snapshot.Snapshot, cl *client) []byte {
 	cl.mu.Lock()
 	view, limit := cl.view, cl.limit
 	cl.mu.Unlock()
-	aircraft, total := snap.Query(view, limit)
-	b, _ := json.Marshal(frame{Type: "snapshot", AircraftList: model.AircraftList{Time: snap.Time, Total: total, Count: len(aircraft), Aircraft: aircraft}})
+	b, _ := json.Marshal(frame{Type: "snapshot", AircraftList: snap.List(view, limit, time.Now(), h.cfg.StaleAfter)})
 	return b
 }

@@ -25,7 +25,7 @@ func testAPI(t *testing.T) humatest.TestAPI {
 	cfg.CreateHooks = nil
 	cfg.SchemasPath = ""
 	_, h := humatest.New(t, cfg)
-	Register(h, Deps{Snaps: snaps})
+	Register(h, Deps{Snaps: snaps, StaleAfter: 3 * time.Minute})
 	return h
 }
 
@@ -39,6 +39,9 @@ func TestListAircraft(t *testing.T) {
 	require.Equal(t, 1, list.Total)
 	require.Equal(t, "DLH2AB", list.Aircraft[0].Callsign)
 	require.Equal(t, model.SourceADSB, list.Aircraft[0].Source)
+	require.True(t, list.Stale)
+	require.Greater(t, list.AgeSeconds, 0)
+	require.Equal(t, "private, no-cache", resp.Header().Get("Cache-Control"))
 
 	resp = h.Get("/aircraft")
 	require.Equal(t, http.StatusOK, resp.Code)

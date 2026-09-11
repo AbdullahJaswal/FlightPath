@@ -18,7 +18,10 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/redis/go-redis/v9"
 
+	"github.com/AbdullahJaswal/flightpath/api/internal/cache"
+	"github.com/AbdullahJaswal/flightpath/api/internal/flights"
 	"github.com/AbdullahJaswal/flightpath/api/internal/store"
 )
 
@@ -63,10 +66,14 @@ func main() {
 		fail(err)
 	}
 
-	steps := map[string]func() error{
-		"airports": func() error { return loadAirports(ctx, st, *airportsSrc, log) },
-		"airlines": func() error { return loadAirlines(ctx, st, *airlinesSrc, log) },
-		"aircraft": func() error { return loadAircraft(ctx, st, *aircraftSrc, log) },
+	invalidate := invalidator(ctx, log)
+	steps := map[string]struct {
+		load     func() error
+		prefixes []string
+	}{
+		"airports": {func() error { return loadAirports(ctx, st, *airportsSrc, log) }, []string{flights.PrefixAirport, flights.PrefixSearch}},
+		"airlines": {func() error { return loadAirlines(ctx, st, *airlinesSrc, log) }, []string{flights.PrefixAirline, flights.PrefixSearch}},
+		"aircraft": {func() error { return loadAircraft(ctx, st, *aircraftSrc, log) }, []string{flights.PrefixAircraft, flights.PrefixSearch}},
 	}
 	for _, name := range strings.Split(*only, ",") {
 		name = strings.TrimSpace(name)
@@ -75,10 +82,29 @@ func main() {
 			fail(fmt.Errorf("unknown dataset %q", name))
 		}
 		start := time.Now()
-		if err := step(); err != nil {
+		if err := step.load(); err != nil {
 			fail(fmt.Errorf("%s: %w", name, err))
 		}
+		invalidate(step.prefixes...)
 		log.Info("loaded", "dataset", name, "took", time.Since(start).Round(time.Millisecond))
+	}
+}
+
+// invalidator drops cached reference data on every API instance after a reload. Without REDIS_URL it does nothing.
+func invalidator(ctx context.Context, log *slog.Logger) func(prefixes ...string) {
+	url := os.Getenv("REDIS_URL")
+	if url == "" {
+		return func(...string) {}
+	}
+	opts, err := redis.ParseURL(url)
+	if err != nil {
+		fail(fmt.Errorf("redis url: %w", err))
+	}
+	c := cache.New(redis.NewClient(opts), 1, log)
+	return func(prefixes ...string) {
+		for _, p := range prefixes {
+			c.InvalidatePrefix(ctx, p)
+		}
 	}
 }
 
