@@ -1,6 +1,7 @@
 import {
   IconAlertTriangle,
   IconClock,
+  IconGitCommit,
   IconLoader2,
   IconPlane,
   IconUsers,
@@ -83,6 +84,15 @@ export function StatusBar() {
           {stats.data?.poller.mode === "active"
             ? `every ${stats.data.poller.intervalSeconds}s`
             : mode.label}
+        </span>
+      )}
+      {stats.data?.version && (
+        <span
+          className="hidden items-center gap-1 font-mono text-xs xl:flex"
+          title="Deployed build"
+        >
+          <IconGitCommit className="size-3.5" />
+          {stats.data.version}
         </span>
       )}
       <span
