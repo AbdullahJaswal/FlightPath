@@ -23,7 +23,7 @@ export function PageShell({ icon: Icon, title, lead, children }: Props) {
             className="flex items-center gap-2 font-heading font-semibold text-base"
           >
             <IconPlaneInflight className="size-5 text-primary" />
-            Flightpath
+            FlightPath
           </Link>
           <Button
             variant="ghost"

@@ -286,7 +286,7 @@ export function buildActions(d: ActionDeps): Action[] {
     },
     {
       id: "about",
-      label: "About Flightpath",
+      label: "About FlightPath",
       group: "Help",
       icon: IconInfoCircle,
       run: () => d.go("/about"),

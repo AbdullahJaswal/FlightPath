@@ -69,7 +69,7 @@ export function SearchBox({
       <div className="flex items-center gap-2 px-3">
         <IconPlaneInflight className="size-5 text-primary" />
         <span className="font-heading font-semibold text-base tracking-tight">
-          Flightpath
+          FlightPath
         </span>
         <span className="ml-auto flex items-center gap-1 text-[0.625rem] text-muted-foreground uppercase">
           <IconLiveView className="size-3 text-primary" />

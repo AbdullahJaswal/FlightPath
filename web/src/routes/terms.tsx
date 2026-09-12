@@ -9,7 +9,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { PageSection, PageShell } from "@/components/page-shell"
 
 export const Route = createFileRoute("/terms")({
-  head: () => ({ meta: [{ title: "Terms, Flightpath" }] }),
+  head: () => ({ meta: [{ title: "Terms, FlightPath" }] }),
   component: Terms,
 })
 
@@ -22,7 +22,7 @@ function Terms() {
     >
       <PageSection icon={IconHeart} title="Personal and non-commercial">
         <p>
-          Flightpath is a hobby project. There is no account, no payment and no
+          FlightPath is a hobby project. There is no account, no payment and no
           guarantee that it stays online. You may use it for personal,
           non-commercial purposes.
         </p>

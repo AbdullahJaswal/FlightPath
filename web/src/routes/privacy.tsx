@@ -9,7 +9,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { PageSection, PageShell } from "@/components/page-shell"
 
 export const Route = createFileRoute("/privacy")({
-  head: () => ({ meta: [{ title: "Privacy, Flightpath" }] }),
+  head: () => ({ meta: [{ title: "Privacy, FlightPath" }] }),
   component: Privacy,
 })
 

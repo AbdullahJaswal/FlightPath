@@ -13,7 +13,7 @@ import { createFileRoute } from "@tanstack/react-router"
 import { PageSection, PageShell } from "@/components/page-shell"
 
 export const Route = createFileRoute("/about")({
-  head: () => ({ meta: [{ title: "About Flightpath" }] }),
+  head: () => ({ meta: [{ title: "About FlightPath" }] }),
   component: About,
 })
 
@@ -23,12 +23,12 @@ function About() {
   return (
     <PageShell
       icon={IconInfoCircle}
-      title="About Flightpath"
+      title="About FlightPath"
       lead="A live map of aircraft around the world with flight, airport and airline details. A personal, non-commercial project."
     >
       <PageSection icon={IconUserCircle} title="Who made it">
         <p>
-          Flightpath is built and run by Abdullah Jaswal.{" "}
+          FlightPath is built and run by Abdullah Jaswal.{" "}
           <a
             href={site}
             target="_blank"
