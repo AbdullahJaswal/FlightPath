@@ -81,7 +81,7 @@ func (l *Lattice) Cover(b snapshot.Bounds, limit int) []Cell {
 }
 
 // Sweep returns every cell on the globe, the given regions first so a cold start fills the busy
-// sky before it discovers the oceans.
+// sky before it discovers the rest.
 func (l *Lattice) Sweep(regions []snapshot.Bounds) []Cell {
 	seen := map[string]bool{}
 	var out []Cell
@@ -96,9 +96,17 @@ func (l *Lattice) Sweep(regions []snapshot.Bounds) []Cell {
 	for _, r := range regions {
 		add(l.Cells(r))
 	}
-	add(l.Cells(snapshot.World()))
+	// the rest by distance from the busy mid northern latitudes, so a cold start reaches the
+	// remaining land long before it bothers with the poles
+	rest := l.Cells(snapshot.World())
+	sort.SliceStable(rest, func(i, j int) bool {
+		return math.Abs(rest[i].Lat-busyLat) < math.Abs(rest[j].Lat-busyLat)
+	})
+	add(rest)
 	return out
 }
+
+const busyLat = 40.0
 
 func overlapsLon(b snapshot.Bounds, lo, hi float64) bool {
 	if b.West <= b.East {

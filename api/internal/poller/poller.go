@@ -43,6 +43,10 @@ const (
 	errorWait     = 30 * time.Second
 	errorStreak   = 3
 	idleCheck     = time.Second
+	// viewShare is how many viewport fetches may run back to back before a due sweep cell gets a turn.
+	viewShare = 2
+	// wideDivisor cuts the cells and the refresh rate of a viewport too wide to cover in full.
+	wideDivisor = 3
 )
 
 // Source answers one circle query with every aircraft within the radius of a point.
@@ -109,6 +113,7 @@ type Poller struct {
 	lastRetention time.Time
 	lastPublish   time.Time
 	failures      int
+	viewStreak    int
 }
 
 func New(cfg Config, source Source, snaps *snapshot.Store, c *cache.Cache, st *store.Store, rdb *redis.Client, log *slog.Logger) *Poller {
@@ -244,11 +249,22 @@ func (p *Poller) Run(ctx context.Context) error {
 }
 
 // next picks the most overdue cell under a viewport, then the most overdue sweep cell, and nothing
-// when everything is fresher than the active interval.
+// when everything is fresh. A wide viewport can want more than the whole request budget, so after
+// two viewport fetches in a row a due sweep cell takes the next turn, and the world keeps filling.
 func (p *Poller) next(now time.Time, views []snapshot.Bounds) (Cell, bool) {
-	want := map[string]Cell{}
+	// a view wider than its cell cap is a sample of the world at best, so it gets fewer cells and
+	// a slower refresh, and the sweep does the real work
+	want, wide := map[string]Cell{}, map[string]bool{}
 	for _, v := range views {
-		for _, c := range p.lattice.Cover(v, p.cfg.MaxCells) {
+		cells := p.lattice.Cells(v)
+		if len(cells) > p.cfg.MaxCells {
+			for _, c := range p.lattice.Cover(v, max(1, p.cfg.MaxCells/wideDivisor)) {
+				want[c.Key] = c
+				wide[c.Key] = true
+			}
+			continue
+		}
+		for _, c := range cells {
 			want[c.Key] = c
 		}
 	}
@@ -264,13 +280,30 @@ func (p *Poller) next(now time.Time, views []snapshot.Bounds) (Cell, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.status.ViewCells = len(view)
-	if c, ok := p.overdue(now, view, func(Cell) time.Duration { return p.cfg.ActiveInterval }); ok {
+	sweepDue := func() (Cell, bool) {
+		return p.overdue(now, p.sweep, func(c Cell) time.Duration {
+			_, known := p.fetched[c.Key]
+			return sweepInterval(p.density[c.Key], known)
+		})
+	}
+	if p.viewStreak >= viewShare {
+		if c, ok := sweepDue(); ok {
+			p.viewStreak = 0
+			return c, true
+		}
+	}
+	viewInterval := func(c Cell) time.Duration {
+		if wide[c.Key] {
+			return p.cfg.ActiveInterval * wideDivisor
+		}
+		return p.cfg.ActiveInterval
+	}
+	if c, ok := p.overdue(now, view, viewInterval); ok {
+		p.viewStreak++
 		return c, true
 	}
-	return p.overdue(now, p.sweep, func(c Cell) time.Duration {
-		_, known := p.fetched[c.Key]
-		return sweepInterval(p.density[c.Key], known)
-	})
+	p.viewStreak = 0
+	return sweepDue()
 }
 
 // sweepInterval is how often a background cell is worth a request, judged by what it reported

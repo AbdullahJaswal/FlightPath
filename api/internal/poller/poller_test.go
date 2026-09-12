@@ -133,6 +133,48 @@ func TestCellStateSurvivesRestart(t *testing.T) {
 	require.True(t, known)
 }
 
+func TestWideViewportLeavesRoomForSweep(t *testing.T) {
+	p := testPoller()
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	world := []snapshot.Bounds{snapshot.World()}
+	// a world view is far wider than the cap, so it is served with a third of the cells
+	viewKeys := map[string]bool{}
+	for _, c := range p.lattice.Cover(snapshot.World(), p.cfg.MaxCells/3) {
+		viewKeys[c.Key] = true
+	}
+	require.Len(t, viewKeys, 4)
+	// with everything due, the viewport gets two turns and the sweep the third, and so on
+	var kinds []bool
+	for range 9 {
+		c, ok := p.next(now, world)
+		require.True(t, ok)
+		kinds = append(kinds, viewKeys[c.Key])
+		p.fetched[c.Key] = now.Add(-time.Hour)
+		if !viewKeys[c.Key] {
+			p.density[c.Key] = 50
+		}
+	}
+	require.Equal(t, []bool{true, true, false, true, true, false, true, true, false}, kinds)
+	require.Equal(t, 4, p.Status().ViewCells)
+
+	// those sampled cells refresh three times slower than a view that fits
+	for k := range viewKeys {
+		p.fetched[k] = now.Add(-15 * time.Second)
+	}
+	for _, c := range p.sweep {
+		p.fetched[c.Key] = now
+		p.density[c.Key] = 0
+	}
+	_, ok := p.next(now, world)
+	require.False(t, ok)
+	for k := range viewKeys {
+		p.fetched[k] = now.Add(-31 * time.Second)
+	}
+	c, ok := p.next(now, world)
+	require.True(t, ok)
+	require.True(t, viewKeys[c.Key])
+}
+
 func TestNextWithoutSweep(t *testing.T) {
 	p := testPoller()
 	p.sweep = nil
