@@ -80,18 +80,23 @@ func (l *Lattice) Cover(b snapshot.Bounds, limit int) []Cell {
 	return cells[:limit]
 }
 
-// Sweep returns the union of cells across the regions, in region order, without duplicates.
+// Sweep returns every cell on the globe, the given regions first so a cold start fills the busy
+// sky before it discovers the oceans.
 func (l *Lattice) Sweep(regions []snapshot.Bounds) []Cell {
 	seen := map[string]bool{}
 	var out []Cell
-	for _, r := range regions {
-		for _, c := range l.Cells(r) {
+	add := func(cells []Cell) {
+		for _, c := range cells {
 			if !seen[c.Key] {
 				seen[c.Key] = true
 				out = append(out, c)
 			}
 		}
 	}
+	for _, r := range regions {
+		add(l.Cells(r))
+	}
+	add(l.Cells(snapshot.World()))
 	return out
 }
 
@@ -125,8 +130,8 @@ func distance(lat1, lon1, lat2, lon2 float64) float64 {
 	return math.Hypot(lat1-lat2, dlon)
 }
 
-// sweepRegions are the busiest patches of sky. They keep the zoomed out map populated and the
-// history flowing without anyone looking at them.
+// sweepRegions are the busiest patches of sky, fetched first when nothing is known yet. After that
+// the sweep is driven by what each cell last reported.
 var sweepRegions = []snapshot.Bounds{
 	{West: -10, South: 36, East: 26, North: 56},    // Europe
 	{West: -100, South: 25, East: -66, North: 46},  // North America, east

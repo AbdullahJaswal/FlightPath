@@ -1,6 +1,5 @@
 import {
   IconAlertTriangle,
-  IconClock,
   IconGitCommit,
   IconLoader2,
   IconPlane,
@@ -10,8 +9,7 @@ import {
 } from "@tabler/icons-react"
 import { StatusSkeleton } from "@/components/skeletons"
 import { useGetStats } from "@/lib/api/stats/stats"
-import { formatAge, formatInt } from "@/lib/format"
-import { useNow } from "@/lib/hooks"
+import { formatInt } from "@/lib/format"
 import { pollerModeInfo } from "@/lib/labels"
 import { useLive } from "@/lib/live"
 
@@ -20,9 +18,7 @@ export function StatusBar() {
   const stats = useGetStats({
     query: { refetchInterval: 15_000, staleTime: 5_000 },
   })
-  const now = useNow(1000)
   const frame = live.frame
-  const age = frame ? frame.ageSeconds + (now - live.receivedAt) / 1000 : null
   const stale = frame?.stale ?? false
   const mode = stats.data ? pollerModeInfo[stats.data.poller.mode] : null
   const ConnectionIcon =
@@ -55,18 +51,13 @@ export function StatusBar() {
           </span>
         )}
       </span>
-      {age != null && (
+      {stale && (
         <span
-          className={`flex items-center gap-1 ${stale ? "text-destructive" : ""}`}
-          title="Age of the latest position snapshot"
+          className="flex items-center gap-1 text-destructive"
+          title="No fresh positions from the feed"
         >
-          {stale ? (
-            <IconAlertTriangle className="size-3.5" />
-          ) : (
-            <IconClock className="size-3.5" />
-          )}
-          {stale ? "stale, " : ""}
-          {formatAge(age)}
+          <IconAlertTriangle className="size-3.5" />
+          stale
         </span>
       )}
       {stats.data && (

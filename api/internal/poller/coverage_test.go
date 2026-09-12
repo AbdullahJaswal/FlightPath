@@ -55,7 +55,7 @@ func TestCellsAcrossAntimeridian(t *testing.T) {
 	require.True(t, east && west)
 }
 
-func TestSweepSize(t *testing.T) {
+func TestSweepCoversGlobeBusyFirst(t *testing.T) {
 	l := NewLattice(250)
 	cells := l.Sweep(sweepRegions)
 	seen := map[string]bool{}
@@ -63,10 +63,12 @@ func TestSweepSize(t *testing.T) {
 		require.False(t, seen[c.Key])
 		seen[c.Key] = true
 	}
-	// enough to show the busy corridors, few enough to refresh in a few minutes
-	require.Greater(t, len(cells), 100)
-	require.Less(t, len(cells), 220)
-	t.Logf("sweep cells: %d", len(cells))
+	require.Len(t, cells, len(l.Cells(snapshot.World())))
+	// the first cells are the busy regions, in their order
+	require.Equal(t, l.Cells(sweepRegions[0])[0].Key, cells[0].Key)
+	europe := len(l.Cells(sweepRegions[0]))
+	require.Less(t, europe, 100)
+	t.Logf("cells: %d, europe first: %d", len(cells), europe)
 }
 
 func greatCircleNM(lat1, lon1, lat2, lon2 float64) float64 {

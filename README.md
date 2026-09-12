@@ -24,7 +24,7 @@ Live aircraft on a world map or a globe with flight, airport and airline details
 
 ## How it works
 
-- One poller instance fetches positions one 250 nm circle at a time, the areas viewers are looking at first and a background sweep of busy airspace after, and shares each snapshot with every instance through Redis.
+- One poller instance fetches positions one 250 nm circle at a time: the areas viewers are looking at first, then a sweep of the whole globe that revisits each circle as often as its traffic warrants. Snapshots are shared with every instance through Redis.
 - Browsers open a WebSocket, send their viewport and receive the aircraft inside it after every poll. The map draws them on a canvas and extrapolates positions between snapshots.
 - The browser only talks to the web app. Its `/bff` route forwards API calls with cache headers and ETags intact, and the live stream is proxied to the API WebSocket.
 - An in-process cache in front of Redis serves metadata. Invalidations fan out to all instances and expirations are bounded so nothing outlives its source.

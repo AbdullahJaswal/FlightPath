@@ -37,7 +37,7 @@ type ADSB struct {
 	RadiusNM       int           `env:"RADIUS_NM" envDefault:"250"`
 	MinInterval    time.Duration `env:"MIN_INTERVAL" envDefault:"1200ms"`
 	ActiveInterval time.Duration `env:"ACTIVE_INTERVAL" envDefault:"10s"`
-	IdleInterval   time.Duration `env:"IDLE_INTERVAL" envDefault:"3s"`
+	IdleInterval   time.Duration `env:"IDLE_INTERVAL" envDefault:"1600ms"`
 	MaxCells       int           `env:"MAX_CELLS" envDefault:"12"`
 	DailyRequests  int           `env:"DAILY_REQUESTS" envDefault:"60000"`
 	WorldSweep     bool          `env:"WORLD_SWEEP" envDefault:"true"`

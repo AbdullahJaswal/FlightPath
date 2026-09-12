@@ -72,6 +72,67 @@ func TestNextPrefersViewportThenSweep(t *testing.T) {
 	require.NotEqual(t, viewCells[0].Key, c.Key)
 }
 
+func TestSweepPriority(t *testing.T) {
+	p := testPoller()
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+
+	// nothing known: the first busy region cell goes first
+	c, ok := p.next(now, nil)
+	require.True(t, ok)
+	require.Equal(t, p.sweep[0].Key, c.Key)
+
+	// everything fetched an hour ago: the busiest cell is furthest past its own interval
+	for _, sc := range p.sweep {
+		p.fetched[sc.Key] = now.Add(-time.Hour)
+	}
+	busy := p.sweep[len(p.sweep)-1]
+	p.density[busy.Key] = 300
+	c, ok = p.next(now, nil)
+	require.True(t, ok)
+	require.Equal(t, busy.Key, c.Key)
+
+	// relative lateness wins: a medium cell 20 minutes old outranks a busy cell 9 minutes old, and
+	// an empty cell fetched an hour ago is not due at all
+	for _, sc := range p.sweep {
+		p.fetched[sc.Key] = now
+	}
+	medium := p.sweep[1]
+	p.density[medium.Key] = 20
+	p.fetched[medium.Key] = now.Add(-20 * time.Minute)
+	p.fetched[busy.Key] = now.Add(-9 * time.Minute)
+	empty := p.sweep[2]
+	p.density[empty.Key] = 0
+	p.fetched[empty.Key] = now.Add(-time.Hour)
+	c, ok = p.next(now, nil)
+	require.True(t, ok)
+	require.Equal(t, medium.Key, c.Key)
+	p.fetched[medium.Key] = now
+	c, ok = p.next(now, nil)
+	require.True(t, ok)
+	require.Equal(t, busy.Key, c.Key)
+	p.fetched[busy.Key] = now
+	_, ok = p.next(now, nil)
+	require.False(t, ok)
+}
+
+func TestCellStateSurvivesRestart(t *testing.T) {
+	p := testPoller()
+	p.rdb = testRedis(t)
+	ctx := context.Background()
+	at := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	p.saveCell(ctx, p.sweep[0], at, 42)
+	p.saveCell(ctx, p.sweep[1], at.Add(time.Minute), 0)
+
+	q := testPoller()
+	q.rdb = p.rdb
+	q.restoreCells(ctx)
+	require.Equal(t, at, q.fetched[p.sweep[0].Key])
+	require.Equal(t, 42, q.density[p.sweep[0].Key])
+	require.Equal(t, 0, q.density[p.sweep[1].Key])
+	_, known := q.fetched[p.sweep[1].Key]
+	require.True(t, known)
+}
+
 func TestNextWithoutSweep(t *testing.T) {
 	p := testPoller()
 	p.sweep = nil
@@ -103,6 +164,24 @@ func TestMergeKeepsNewestAndEvicts(t *testing.T) {
 	require.Equal(t, 1, snap.Len())
 	_, ok = snap.Get("def456")
 	require.False(t, ok)
+}
+
+func TestSeedFromRestoredSnapshot(t *testing.T) {
+	p := testPoller()
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	restored := []model.Aircraft{
+		{ICAO24: "abc123", Lat: 1, Lon: 1, PositionAt: now.Add(-time.Minute), LastContact: now.Add(-time.Minute)},
+		{ICAO24: "def456", Lat: 2, Lon: 2, PositionAt: now.Add(-time.Minute), LastContact: now.Add(-time.Minute)},
+	}
+	p.snaps.Set(snapshot.New(now, restored))
+	p.seed()
+
+	fresh := model.Aircraft{ICAO24: "abc123", Lat: 1.5, Lon: 1, PositionAt: now, LastContact: now}
+	snap := p.merge(&adsb.Batch{Time: now, Aircraft: []model.Aircraft{fresh}}, now)
+	require.Equal(t, 2, snap.Len())
+	a, ok := snap.Get("abc123")
+	require.True(t, ok)
+	require.Equal(t, 1.5, a.Lat)
 }
 
 func TestDownsample(t *testing.T) {

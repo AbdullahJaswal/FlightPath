@@ -30,6 +30,10 @@ const (
 	reportTTL    = 30 * time.Second
 )
 
+// frameGap caps how often clients get a new frame. The poller publishes a snapshot after every
+// circle it fetches, and browsers dead reckon between frames anyway. A variable so tests can shorten it.
+var frameGap = 2 * time.Second
+
 type Config struct {
 	InstanceID     string
 	OriginPatterns []string
@@ -114,11 +118,19 @@ func (h *Hub) Run(ctx context.Context) error {
 	defer unsubscribe()
 	ticker := time.NewTicker(reportEvery)
 	defer ticker.Stop()
+	frames := time.NewTicker(frameGap)
+	defer frames.Stop()
+	var latest, sent *snapshot.Snapshot
 	h.report(ctx)
 	for {
 		select {
 		case snap := <-ch:
-			h.broadcast(snap)
+			latest = snap
+		case <-frames.C:
+			if latest != sent {
+				h.broadcast(latest)
+				sent = latest
+			}
 		case <-ticker.C:
 			h.report(ctx)
 		case <-ctx.Done():
@@ -138,7 +150,11 @@ func (h *Hub) Handler() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"title": "Service Unavailable", "status": 503, "detail": "too many live connections"})
 			return
 		}
-		conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{OriginPatterns: h.cfg.OriginPatterns})
+		// frames at world zoom run to hundreds of kilobytes of JSON and deflate about six to one
+		conn, err := websocket.Accept(c.Writer, c.Request, &websocket.AcceptOptions{
+			OriginPatterns:  h.cfg.OriginPatterns,
+			CompressionMode: websocket.CompressionContextTakeover,
+		})
 		if err != nil {
 			h.log.Debug("websocket accept failed", "err", err)
 			return

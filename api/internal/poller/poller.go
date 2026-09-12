@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"sort"
@@ -26,6 +27,7 @@ const (
 	snapshotChannel = "snapshot"
 	leaderKey       = "poller:leader"
 	requestsKey     = "adsb:requests:"
+	cellsKey        = "adsb:cells"
 	leaderTTL       = 90 * time.Second
 	minStoreGap     = 5 * time.Minute
 	trailBatchLimit = 500
@@ -33,10 +35,10 @@ const (
 	altitudeDelta   = 100.0
 	retentionEvery  = 10 * time.Minute
 	staleAfter      = time.Hour
-	// keepFor bounds how long an aircraft stays in the snapshot without a fresh report. It matches
-	// how long the web client is willing to dead reckon a position forward.
-	keepFor       = 10 * time.Minute
-	publishEvery  = 5 * time.Second
+	// keepFor bounds how long an aircraft stays in the snapshot without a fresh report. It outlasts
+	// the slowest sweep interval below, so quiet corners of the map do not blink between visits.
+	keepFor       = 45 * time.Minute
+	publishEvery  = 10 * time.Second
 	rateLimitWait = time.Minute
 	errorWait     = 30 * time.Second
 	errorStreak   = 3
@@ -101,6 +103,7 @@ type Poller struct {
 	requestsDay   string
 	fetched       map[string]time.Time
 	retryAt       map[string]time.Time
+	density       map[string]int
 	state         map[string]model.Aircraft
 	last          map[string]lastPos
 	lastRetention time.Time
@@ -121,6 +124,7 @@ func New(cfg Config, source Source, snaps *snapshot.Store, c *cache.Cache, st *s
 		now:     time.Now,
 		fetched: make(map[string]time.Time),
 		retryAt: make(map[string]time.Time),
+		density: make(map[string]int),
 		state:   make(map[string]model.Aircraft),
 		last:    make(map[string]lastPos),
 	}
@@ -146,6 +150,8 @@ func (p *Poller) update(fn func(*Status)) {
 // Run fetches until ctx is cancelled. Only the instance holding the Redis leader lock fetches.
 func (p *Poller) Run(ctx context.Context) error {
 	p.restoreRequests(ctx)
+	p.restoreCells(ctx)
+	p.seed()
 	defer p.releaseLeader()
 	for {
 		if !p.acquireLeader(ctx) {
@@ -258,25 +264,54 @@ func (p *Poller) next(now time.Time, views []snapshot.Bounds) (Cell, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.status.ViewCells = len(view)
-	if c, ok := p.overdue(now, view); ok {
+	if c, ok := p.overdue(now, view, func(Cell) time.Duration { return p.cfg.ActiveInterval }); ok {
 		return c, true
 	}
-	return p.overdue(now, p.sweep)
+	return p.overdue(now, p.sweep, func(c Cell) time.Duration {
+		_, known := p.fetched[c.Key]
+		return sweepInterval(p.density[c.Key], known)
+	})
 }
 
-func (p *Poller) overdue(now time.Time, cells []Cell) (Cell, bool) {
+// sweepInterval is how often a background cell is worth a request, judged by what it reported
+// last time. Busy sky stays fresh, empty ocean is checked rarely, unknown cells go straight away.
+func sweepInterval(density int, known bool) time.Duration {
+	switch {
+	case !known:
+		return 0
+	case density >= 40:
+		return 8 * time.Minute
+	case density >= 10:
+		return 15 * time.Minute
+	case density >= 1:
+		return 30 * time.Minute
+	}
+	return 2 * time.Hour
+}
+
+// overdue returns the cell furthest past its own interval, measured as a ratio so a busy cell that
+// is a few minutes late outranks an empty one that is an hour late. Unknown cells tie at the top
+// and go in list order, which is busiest region first.
+func (p *Poller) overdue(now time.Time, cells []Cell, interval func(Cell) time.Duration) (Cell, bool) {
 	var best Cell
-	bestAge := time.Duration(-1)
+	bestScore, bestDensity := -1.0, -1
 	for _, c := range cells {
 		if p.retryAt[c.Key].After(now) {
 			continue
 		}
-		age := now.Sub(p.fetched[c.Key])
-		if age >= p.cfg.ActiveInterval && age > bestAge {
-			best, bestAge = c, age
+		score := math.Inf(1)
+		if last, known := p.fetched[c.Key]; known {
+			score = now.Sub(last).Seconds() / interval(c).Seconds()
+		}
+		if score < 1 {
+			continue
+		}
+		density := p.density[c.Key]
+		if score > bestScore || (score == bestScore && density > bestDensity) {
+			best, bestScore, bestDensity = c, score, density
 		}
 	}
-	return best, bestAge >= 0
+	return best, bestScore >= 1
 }
 
 func (p *Poller) fetch(ctx context.Context, cell Cell) error {
@@ -293,8 +328,10 @@ func (p *Poller) fetch(ctx context.Context, cell Cell) error {
 	}
 	p.mu.Lock()
 	p.fetched[cell.Key] = now
+	p.density[cell.Key] = len(batch.Aircraft)
 	p.failures = 0
 	p.mu.Unlock()
+	p.saveCell(ctx, cell, now, len(batch.Aircraft))
 	snap := p.merge(batch, now)
 	p.publish(ctx, snap, now)
 	if rows := p.downsample(batch.Aircraft, now); len(rows) > 0 {
@@ -370,6 +407,51 @@ func (p *Poller) count(ctx context.Context, now time.Time) {
 	pipe.Expire(ctx, key, 48*time.Hour)
 	if _, err := pipe.Exec(ctx); err != nil {
 		p.log.Debug("request count write failed", "err", err)
+	}
+}
+
+// seed starts the tracked aircraft from the snapshot restored out of Redis, so a restart carries
+// the whole picture forward instead of showing only the first circle it fetches.
+func (p *Poller) seed() {
+	snap := p.snaps.Current()
+	if snap == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, a := range snap.All() {
+		if _, ok := p.state[a.ICAO24]; !ok {
+			p.state[a.ICAO24] = a
+		}
+	}
+}
+
+// saveCell records when a cell was last fetched and what it held, so a restart carries on where
+// the sweep left off instead of rediscovering every empty stretch of ocean.
+func (p *Poller) saveCell(ctx context.Context, cell Cell, at time.Time, density int) {
+	pipe := p.rdb.TxPipeline()
+	pipe.HSet(ctx, cellsKey, cell.Key, fmt.Sprintf("%d,%d", at.Unix(), density))
+	pipe.Expire(ctx, cellsKey, 24*time.Hour)
+	if _, err := pipe.Exec(ctx); err != nil {
+		p.log.Debug("cell state write failed", "err", err)
+	}
+}
+
+func (p *Poller) restoreCells(ctx context.Context) {
+	vals, err := p.rdb.HGetAll(ctx, cellsKey).Result()
+	if err != nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for key, v := range vals {
+		var at int64
+		var density int
+		if _, err := fmt.Sscanf(v, "%d,%d", &at, &density); err != nil {
+			continue
+		}
+		p.fetched[key] = time.Unix(at, 0).UTC()
+		p.density[key] = density
 	}
 }
 

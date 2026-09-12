@@ -1,7 +1,8 @@
 import type { Aircraft, Route } from "@/lib/api/schemas"
 import { deadReckon, haversineKm } from "./geo"
 
-export const maxExtrapolationS = 600
+// keep in step with how long the API keeps an aircraft without a fresh report
+export const maxExtrapolationS = 900
 
 // Position moved along the last heading and speed since the report, capped.
 export function livePosition(a: Aircraft, nowMs: number): [number, number] {

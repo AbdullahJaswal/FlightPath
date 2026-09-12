@@ -27,6 +27,10 @@ func TestHubStreamsViewport(t *testing.T) {
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
 	defer func() { _ = rdb.Close() }()
 
+	old := frameGap
+	frameGap = 20 * time.Millisecond
+	defer func() { frameGap = old }()
+
 	snaps := snapshot.NewStore()
 	hub := NewHub(Config{InstanceID: "test", MaxConnections: 5}, snaps, rdb, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
